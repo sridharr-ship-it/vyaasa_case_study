@@ -5,3 +5,4 @@ langchain-core
 langgraph
 langchain-community
 langgraph-checkpoint-sqlite
+streamlit_ace
