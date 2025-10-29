@@ -426,8 +426,6 @@ def welcome_page():
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown("## 👋 Welcome!")
-    st.write("This system simulates a McKinsey/BCG/Bain style technical case study.")
     
     with st.form("candidate_info"):
         st.markdown("### Your Information")
