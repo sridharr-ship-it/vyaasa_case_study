@@ -201,7 +201,7 @@ def render_header():
     
     st.markdown(f"""
     <div class="interview-header">
-        <h1 style="margin:0; font-size: 2rem;">💼 Case Study</h1>
+        <h1 style="margin:0; font-size: 2rem;">💼 Technical Case study System</h1>
         <p style="margin:0.5rem 0 0 0; font-size: 0.9rem;">Candidate: {st.session_state.candidate_name} | Role: {st.session_state.role}</p>
         <div style="margin-top: 1rem;">Progress: {progress:.0f}%</div>
     </div>
