@@ -421,13 +421,13 @@ def welcome_page():
     
     st.markdown("""
     <div class="interview-header">
-        <h1 style="margin:0;">💼 Technical Case Interview System</h1>
-        <p style="margin:0.5rem 0 0 0; opacity: 0.9;">Experience a comprehensive consulting-style technical interview</p>
+        <h1 style="margin:0;">💼 Technical Case study System</h1>
+        <p style="margin:0.5rem 0 0 0; opacity: 0.9;">Experience a comprehensive consulting-style technical case study</p>
     </div>
     """, unsafe_allow_html=True)
     
     st.markdown("## 👋 Welcome!")
-    st.write("This system simulates a McKinsey/BCG/Bain style technical case interview.")
+    st.write("This system simulates a McKinsey/BCG/Bain style technical case study.")
     
     with st.form("candidate_info"):
         st.markdown("### Your Information")
@@ -442,7 +442,7 @@ def welcome_page():
         
         st.markdown("### case study structure")
         st.info("""
-        **Phase 1:** Classification (3 MCQs) - Determine interview domain  
+        **Phase 1:** Classification (3 MCQs) - Determine case study domain  
         **Phase 2:** Understanding (3 questions) - Problem clarification  
         **Phase 3:** Approach (4 questions) - Solution development  
         **Phase 4:** Follow-up (3 questions) - Deep dive discussion  
@@ -451,8 +451,8 @@ def welcome_page():
         **Total Duration:** 25 minutes
         """)
         
-        consent = st.checkbox("I understand this is a timed interview simulation")
-        submitted = st.form_submit_button("🚀 Start Interview", use_container_width=True, type="primary")
+        consent = st.checkbox("I understand this is a timed case study simulation")
+        submitted = st.form_submit_button("🚀 Start case study", use_container_width=True, type="primary")
         
         if submitted:
             if not name or not role:
@@ -464,7 +464,7 @@ def welcome_page():
                 st.session_state.role = role
                 st.session_state.skills = [s.strip() for s in skills_input.split(',')] if skills_input else []
                 
-                with st.spinner("Initializing interview system..."):
+                with st.spinner("Initializing case study system..."):
                     st.session_state.graph = build_interview_graph()
                     st.session_state.nodes = CaseStudyInterviewNodes()
                     
@@ -492,7 +492,7 @@ def welcome_page():
                     st.session_state.initialized = True
                     st.session_state.current_page = "mcq"
                 
-                st.success("✅ System initialized! Starting interview...")
+                st.success("✅ System initialized! Starting case study...")
                 time.sleep(1)
                 st.rerun()
 
@@ -513,7 +513,7 @@ def mcq_phase():
     st.markdown("""
     <div class="phase-indicator">
         <h2>📋 Phase 1: Classification Assessment</h2>
-        <p>Answer 3 multiple-choice questions to determine your interview domain.</p>
+        <p>Answer 3 multiple-choice questions to determine your case study domain.</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -826,14 +826,14 @@ def results_page():
 def render_sidebar():
     """Render sidebar with navigation and debug options"""
     with st.sidebar:
-        st.markdown("## 🎯 Interview Control Panel")
+        st.markdown("## 🎯 Case study Control Panel")
         
         if st.session_state.initialized:
             st.markdown(f"**Candidate:** {st.session_state.candidate_name}")
             st.markdown(f"**Role:** {st.session_state.role}")
             st.markdown("---")
             
-            st.markdown("### Interview Progress")
+            st.markdown("### Case study Progress")
             state = st.session_state.interview_state
             
             phases = {
@@ -865,7 +865,7 @@ def render_sidebar():
             
             st.markdown("---")
             
-            if st.button("🔄 Restart Interview", use_container_width=True):
+            if st.button("🔄 Restart Case study", use_container_width=True):
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 st.rerun()
