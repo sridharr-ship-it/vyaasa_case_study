@@ -237,7 +237,7 @@ def render_phase_status():
     with col3:
         if st.session_state.start_time:
             elapsed = time.time() - st.session_state.start_time
-            total_time = 1200
+            total_time = 1500
             remaining = max(0, total_time - elapsed)
             st.markdown(f"""
             <div class="timer-box">
@@ -440,7 +440,7 @@ def welcome_page():
         skills_input = st.text_input("Key Technical Skills (comma-separated)", 
                                      placeholder="Python, Machine Learning, SQL")
         
-        st.markdown("### Interview Structure")
+        st.markdown("### case study structure")
         st.info("""
         **Phase 1:** Classification (3 MCQs) - Determine interview domain  
         **Phase 2:** Understanding (3 questions) - Problem clarification  
@@ -448,7 +448,7 @@ def welcome_page():
         **Phase 4:** Follow-up (3 questions) - Deep dive discussion  
         **Phase 5:** Final Evaluation - Comprehensive feedback  
         
-        **Total Duration:** 10 minutes
+        **Total Duration:** 25 minutes
         """)
         
         consent = st.checkbox("I understand this is a timed interview simulation")
