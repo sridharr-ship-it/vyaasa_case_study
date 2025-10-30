@@ -7,8 +7,244 @@ from typing import Dict, List
 from langchain_core.messages import HumanMessage, AIMessage
 from graph.graph_builder import build_interview_graph
 from graph.nodes.interview_nodes import CaseStudyInterviewNodes
+# ==================== REPORT GENERATION FUNCTIONS ====================
+import io
+import zipfile
+import json
+from datetime import datetime
 
-# Try to import code editor (install via: pip install streamlit-ace)
+def generate_chat_transcript() -> str:
+    """Generate a formatted chat transcript of the entire interview"""
+    state = st.session_state.interview_state
+    messages = state.get('messages', [])
+    
+    transcript = []
+    transcript.append("=" * 80)
+    transcript.append("TECHNICAL CASE INTERVIEW - CHAT TRANSCRIPT")
+    transcript.append("=" * 80)
+    transcript.append(f"\nCandidate: {st.session_state.candidate_name}")
+    transcript.append(f"Target Role: {st.session_state.role}")
+    transcript.append(f"Skills: {', '.join(st.session_state.skills)}")
+    transcript.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    transcript.append(f"Duration: {format_time_remaining(int(time.time() - st.session_state.start_time))}")
+    transcript.append("\n" + "=" * 80)
+    
+    # Add case study details
+    case_study = state.get('case_study', {})
+    if case_study:
+        transcript.append("\n\nCASE STUDY DETAILS")
+        transcript.append("-" * 80)
+        transcript.append(f"Domain: {case_study.get('domain', 'N/A')}")
+        transcript.append(f"Type: {state.get('tech_type', 'N/A')}")
+        transcript.append(f"\nScenario:\n{case_study.get('scenario', 'N/A')}")
+        transcript.append(f"\nObjective:\n{case_study.get('objective', 'N/A')}")
+        
+        constraints = case_study.get('constraints', [])
+        if constraints:
+            transcript.append(f"\nConstraints:")
+            for i, constraint in enumerate(constraints, 1):
+                transcript.append(f"  {i}. {constraint}")
+    
+    # Add conversation
+    transcript.append("\n\n" + "=" * 80)
+    transcript.append("INTERVIEW CONVERSATION")
+    transcript.append("=" * 80 + "\n")
+    
+    current_phase = None
+    msg_count = 0
+    
+    for msg in messages:
+        # Detect phase changes based on message content
+        if isinstance(msg, AIMessage):
+            content_lower = msg.content.lower()
+            if 'understanding' in content_lower and current_phase != 'understanding':
+                current_phase = 'understanding'
+                transcript.append(f"\n{'=' * 80}")
+                transcript.append("PHASE: PROBLEM UNDERSTANDING")
+                transcript.append("=" * 80 + "\n")
+            elif 'approach' in content_lower and current_phase != 'approach':
+                current_phase = 'approach'
+                transcript.append(f"\n{'=' * 80}")
+                transcript.append("PHASE: SOLUTION APPROACH")
+                transcript.append("=" * 80 + "\n")
+            elif 'follow' in content_lower and current_phase != 'followup':
+                current_phase = 'followup'
+                transcript.append(f"\n{'=' * 80}")
+                transcript.append("PHASE: FOLLOW-UP DISCUSSION")
+                transcript.append("=" * 80 + "\n")
+        
+        msg_count += 1
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        
+        if isinstance(msg, AIMessage):
+            transcript.append(f"[{timestamp}] INTERVIEWER (Vyaasa):")
+            transcript.append("-" * 80)
+            transcript.append(f"{msg.content}\n")
+        elif isinstance(msg, HumanMessage):
+            transcript.append(f"[{timestamp}] CANDIDATE ({st.session_state.candidate_name}):")
+            transcript.append("-" * 80)
+            transcript.append(f"{msg.content}\n")
+    
+    transcript.append("\n" + "=" * 80)
+    transcript.append(f"END OF TRANSCRIPT - Total Messages: {msg_count}")
+    transcript.append("=" * 80)
+    
+    return "\n".join(transcript)
+
+
+def generate_evaluation_report() -> str:
+    """Generate a comprehensive evaluation report"""
+    state = st.session_state.interview_state
+    
+    report = []
+    report.append("=" * 80)
+    report.append("TECHNICAL CASE INTERVIEW - EVALUATION REPORT")
+    report.append("=" * 80)
+    report.append(f"\nCandidate: {st.session_state.candidate_name}")
+    report.append(f"Target Role: {st.session_state.role}")
+    report.append(f"Skills: {', '.join(st.session_state.skills)}")
+    report.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append("\n" + "=" * 80)
+    
+    # Phase Scores
+    report.append("\n\nPHASE SCORES")
+    report.append("-" * 80)
+    
+    understanding_eval = state.get('understanding_evaluation', {})
+    approach_eval = state.get('approach_evaluation', {})
+    followup_eval = state.get('followup_evaluation', {})
+    
+    understanding_score = understanding_eval.get('score', 0)
+    approach_score = approach_eval.get('score', 0)
+    followup_score = followup_eval.get('score', 0)
+    total_score = understanding_score + approach_score + followup_score
+    
+    report.append(f"\n1. Problem Understanding Phase: {understanding_score}/10")
+    if understanding_eval.get('feedback'):
+        report.append(f"   Feedback: {understanding_eval['feedback']}")
+    
+    report.append(f"\n2. Solution Approach Phase: {approach_score}/10")
+    if approach_eval.get('feedback'):
+        report.append(f"   Feedback: {approach_eval['feedback']}")
+    
+    report.append(f"\n3. Follow-up Discussion Phase: {followup_score}/10")
+    if followup_eval.get('feedback'):
+        report.append(f"   Feedback: {followup_eval['feedback']}")
+    
+    report.append(f"\n{'─' * 80}")
+    report.append(f"TOTAL SCORE: {total_score}/30")
+    
+    # Final Evaluation
+    final_eval = state.get('final_evaluation', {})
+    
+    if final_eval:
+        report.append("\n\n" + "=" * 80)
+        report.append("OVERALL ASSESSMENT")
+        report.append("=" * 80)
+        report.append(f"\n{final_eval.get('interview_summary', 'No summary available')}")
+        
+        # Dimension Scores
+        dimension_scores = final_eval.get('dimension_scores', [])
+        if dimension_scores:
+            report.append("\n\n" + "=" * 80)
+            report.append("DIMENSION-WISE EVALUATION")
+            report.append("=" * 80)
+            
+            for i, dim in enumerate(dimension_scores, 1):
+                report.append(f"\n{i}. {dim['dimension']}")
+                report.append(f"   Score: {dim['score']}/10 (Weight: {dim['weight']}%)")
+                report.append(f"   Justification: {dim['justification']}")
+                if 'candidate_response_excerpt' in dim:
+                    excerpt = dim['candidate_response_excerpt']
+                    report.append(f"   Your Response Excerpt: \"{excerpt[:200]}...\"")
+                report.append("")
+        
+        # Strengths
+        strengths = final_eval.get('key_strengths', [])
+        if strengths:
+            report.append("\n" + "=" * 80)
+            report.append("KEY STRENGTHS")
+            report.append("=" * 80)
+            for i, strength in enumerate(strengths, 1):
+                report.append(f"{i}. {strength}")
+        
+        # Development Areas
+        dev_areas = final_eval.get('development_areas', [])
+        if dev_areas:
+            report.append("\n\n" + "=" * 80)
+            report.append("DEVELOPMENT AREAS")
+            report.append("=" * 80)
+            for i, area in enumerate(dev_areas, 1):
+                report.append(f"{i}. {area}")
+        
+        # Recommendations
+        recommendations = final_eval.get('recommended_next_steps', [])
+        if recommendations:
+            report.append("\n\n" + "=" * 80)
+            report.append("RECOMMENDED NEXT STEPS")
+            report.append("=" * 80)
+            for i, rec in enumerate(recommendations, 1):
+                report.append(f"{i}. {rec}")
+    
+    # Interview Metadata
+    report.append("\n\n" + "=" * 80)
+    report.append("INTERVIEW METADATA")
+    report.append("=" * 80)
+    case_study = state.get('case_study', {})
+    report.append(f"\nCase Domain: {case_study.get('domain', 'N/A')}")
+    report.append(f"Technical Type: {state.get('tech_type', 'N/A')}")
+    report.append(f"Questions Asked: {len(state.get('messages', []))}")
+    report.append(f"Interview Duration: {format_time_remaining(int(time.time() - st.session_state.start_time))}")
+    
+    report.append("\n\n" + "=" * 80)
+    report.append("END OF EVALUATION REPORT")
+    report.append("=" * 80)
+    
+    return "\n".join(report)
+
+
+def create_interview_report_zip() -> bytes:
+    """Create a ZIP file containing chat transcript and evaluation report"""
+    # Create BytesIO object to store ZIP in memory
+    zip_buffer = io.BytesIO()
+    
+    # Generate reports
+    chat_transcript = generate_chat_transcript()
+    evaluation_report = generate_evaluation_report()
+    
+    # Generate metadata JSON
+    state = st.session_state.interview_state
+    metadata = {
+        "candidate_name": st.session_state.candidate_name,
+        "role": st.session_state.role,
+        "skills": st.session_state.skills,
+        "interview_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "scores": {
+            "understanding": state.get('understanding_evaluation', {}).get('score', 0),
+            "approach": state.get('approach_evaluation', {}).get('score', 0),
+            "followup": state.get('followup_evaluation', {}).get('score', 0)
+        },
+        "domain": state.get('case_study', {}).get('domain', 'N/A'),
+        "tech_type": state.get('tech_type', 'N/A')
+    }
+    
+    # Create ZIP file
+    with zipfile.ZipFile(zip_buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+        # Add chat transcript
+        zf.writestr('01_Chat_Transcript.txt', chat_transcript.encode('utf-8'))
+        
+        # Add evaluation report
+        zf.writestr('02_Evaluation_Report.txt', evaluation_report.encode('utf-8'))
+        
+        # Add metadata JSON
+        zf.writestr('03_Metadata.json', json.dumps(metadata, indent=2).encode('utf-8'))
+    
+    # Reset buffer position to beginning
+    zip_buffer.seek(0)
+    
+    return zip_buffer.getvalue()
+
+
 try:
     from streamlit_ace import st_ace
     EDITOR_AVAILABLE = True
@@ -752,7 +988,7 @@ def results_page():
     
     st.markdown("""
     <div class="interview-header">
-        <h1 style="margin:0;">🎉 Case study Completed!</h1>
+        <h1 style="margin:0;">🎉 Case Interview Completed!</h1>
         <p style="margin:0.5rem 0 0 0; opacity: 0.9;">Thank you for participating</p>
     </div>
     """, unsafe_allow_html=True)
@@ -807,17 +1043,38 @@ def results_page():
     
     st.markdown("---")
     
+    # Updated download and restart buttons
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("🔄 Start New case study", use_container_width=True, type="primary"):
+        try:
+            # Generate ZIP file
+            zip_data = create_interview_report_zip()
+            
+            # Generate filename with timestamp
+            filename = f"Interview_Report_{st.session_state.candidate_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            
+            # Download button
+            st.download_button(
+                label="📥 Download Complete Report (ZIP)",
+                data=zip_data,
+                file_name=filename,
+                mime="application/zip",
+                use_container_width=True,
+                type="primary"
+            )
+            
+        except Exception as e:
+            st.error(f"Error generating report: {str(e)}")
+            if st.session_state.debug_mode:
+                import traceback
+                st.code(traceback.format_exc())
+    
+    with col2:
+        if st.button("🔄 Start New Interview", use_container_width=True):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
-    
-    with col2:
-        if st.button("📥 Download Report", use_container_width=True):
-            st.info("Report download feature coming soon!")
 
 
 # ==================== SIDEBAR ====================
