@@ -77,7 +77,7 @@ def generate_chat_transcript() -> str:
         timestamp = datetime.now().strftime('%H:%M:%S')
         
         if isinstance(msg, AIMessage):
-            transcript.append(f"[{timestamp}] INTERVIEWER (Vyaasa):")
+            transcript.append(f"[{timestamp}] CASE STUDY (Vyaasa):")
             transcript.append("-" * 80)
             transcript.append(f"{msg.content}\n")
         elif isinstance(msg, HumanMessage):
