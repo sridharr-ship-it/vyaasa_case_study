@@ -431,8 +431,6 @@ def welcome_page():
         **Phase 3:** Approach (4 questions) - Solution development  
         **Phase 4:** Follow-up (3 questions) - Deep dive discussion  
         **Phase 5:** Final Evaluation - Comprehensive feedback  
-        
-        **Total Duration:** 25 minutes
         """)
         
       
