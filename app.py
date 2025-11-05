@@ -283,14 +283,7 @@ def apply_custom_css():
         color: white;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .timer-box {
-        background-color: #ffffff;
-        border-left: 5px solid #00a3e0;
-        padding: 1rem;
-        border-radius: 5px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin-bottom: 1rem;
-    }
+    
     .phase-indicator {
         background: white;
         padding: 1.5rem;
@@ -461,7 +454,7 @@ def render_phase_status():
     
     emoji, title, description = phase_info.get(current_phase, ('📌', 'Interview', 'In Progress'))
     
-    col1, col2, col3 = st.columns([1, 2, 2])
+    col1, col2 = st.columns([1, 2])
     
     with col1:
         st.markdown(f"<div style='font-size: 3rem; text-align: center;'>{emoji}</div>", unsafe_allow_html=True)
@@ -470,20 +463,7 @@ def render_phase_status():
         st.markdown(f"### {title}")
         st.caption(description)
     
-    with col3:
-        if st.session_state.start_time:
-            elapsed = time.time() - st.session_state.start_time
-            total_time = 1500
-            remaining = max(0, total_time - elapsed)
-            st.markdown(f"""
-            <div class="timer-box">
-                <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.3rem;">⏱️ Time Remaining</div>
-                <div style="font-size: 1.8rem; font-weight: bold; color: {'#d32f2f' if remaining < 120 else '#00a3e0'};">
-                    {format_time_remaining(remaining)}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
+   
 
 def render_chat_messages():
     """Render all conversation messages"""
