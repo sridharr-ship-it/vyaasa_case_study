@@ -439,8 +439,7 @@ def welcome_page():
         if submitted:
             if not name or not role:
                 st.error("Please provide your name, role.")
-            elif not consent:
-                st.error("Please confirm your understanding to proceed.")
+    
             else:
                 st.session_state.candidate_name = name
                 st.session_state.role = role
