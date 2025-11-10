@@ -12,26 +12,27 @@ class CaseStudyInterviewNodes:
     
     def extract_json(self, text: str) -> dict:
         """Extract JSON from LLM response with multiple fallback strategies."""
+        
         if not text:
             return {}
         
-        # Strategy 1: Try code blocks with json marker
-        code_block = re.search(r'``````', text, re.DOTALL | re.IGNORECASE)
-        if code_block:
+        # Strategy 1: Try json code blocks
+        json_match = re.search(r'``````', text, flags=re.DOTALL | re.IGNORECASE)
+        if json_match:
             try:
-                return json.loads(code_block.group(1))
+                return json.loads(json_match.group(1))
             except json.JSONDecodeError:
                 pass
         
         # Strategy 2: Try any code blocks
-        code_block = re.search(r'``````', text, re.DOTALL)
-        if code_block:
+        code_match = re.search(r'``````', text, flags=re.DOTALL)
+        if code_match:
             try:
-                return json.loads(code_block.group(1))
+                return json.loads(code_match.group(1))
             except json.JSONDecodeError:
                 pass
         
-        # Strategy 3: Find JSON object directly
+        # Strategy 3: Find JSON object directly using balanced braces
         brace_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
         if brace_match:
             try:
@@ -39,16 +40,9 @@ class CaseStudyInterviewNodes:
             except json.JSONDecodeError:
                 pass
         
-        # Strategy 4: Try to extract between first { and last }
-        try:
-            start = text.find('{')
-            end = text.rfind('}')
-            if start != -1 and end != -1 and end > start:
-                return json.loads(text[start:end+1])
-        except json.JSONDecodeError:
-            pass
-        
+        # If all strategies fail, return empty dict
         return {}
+
     
     # ========== MCQ CLASSIFICATION NODES ==========
     
@@ -57,92 +51,26 @@ class CaseStudyInterviewNodes:
         role = state.get('role', ' ')
         skills = ', '.join(state.get('skills', []))
         mcq_current = state.get('mcq_current_question', 0)
-        
-        # If we already have 3 answers, move to processing
+
         if len(state.get('mcq_answers', [])) >= 3:
-            return {
-                "current_activity": "processing_mcq"
-            }
-        
-        # Generate question based on which one we're on
+            return {"current_activity": "processing_mcq"}
+
         llm = get_llm_for_task('mcq', temperature=0.5)
-        
-        if mcq_current == 0:
-            # Question 1: Problem type based on role
-            prompt = f"""Generate ONE multiple-choice question to understand problem-solving preferences.
-
-Role: {role}
-Skills: {skills}
-
-Generate a question that helps determine if they prefer:
-- Analytical/data-driven problems
-- Strategic/business problems
-- Technical/implementation problems
-
-Make it relevant to their role. Return JSON:
-{{
-  "question": "...",
-  "options": [
-    {{"letter": "A", "text": "..."}},
-    {{"letter": "B", "text": "..."}},
-    {{"letter": "C", "text": "..."}}
-  ]
-}}"""
-        
-        elif mcq_current == 1:
-            # Question 2: Industry preference
-            prompt = f"""Generate ONE multiple-choice question about industry preference.
-
-Role: {role}
-Skills: {skills}
-
-Generate a question asking which industry they're most interested in or experienced with.
-Include 3 diverse industry options relevant to {role}.
-
-Return JSON:
-{{
-  "question": "...",
-  "options": [
-    {{"letter": "A", "text": "..."}},
-    {{"letter": "B", "text": "..."}},
-    {{"letter": "C", "text": "..."}}
-  ]
-}}"""
-        
-        else:  # mcq_current == 2
-            # Question 3: Case complexity
-            prompt = f"""Generate ONE multiple-choice question about preferred case complexity.
-
-Role: {role}
-Skills: {skills}
-
-Generate a question about their preferred case study style
-- Structured problem with clear metrics
-- Open-ended exploratory analysis
-- Mixed approach with ambiguity
-
-Make it relevant to the role and return JSON:
-{{
-  "question": "...",
-  "options": [
-    {{"letter": "A", "text": "..."}},
-    {{"letter": "B", "text": "..."}},
-    {{"letter": "C", "text": "..."}}
-  ]
-}}"""
-        
+        prompt = CaseInterviewPrompts.generate_mcq_questions(role, skills, mcq_current + 1)
         response = llm.invoke([SystemMessage(content=prompt)])
-        question_data = self.extract_json(response.content)
         
-        if not question_data:
-            # Fallback
+        question_data = self.extract_json(response.content)
+
+        # Properly formatted fallback with valid JSON structure
+        if not question_data or 'question' not in question_data or 'options' not in question_data:
             fallback_questions = [
                 {
                     "question": "What type of problems do you prefer working on?",
                     "options": [
                         {"letter": "A", "text": "Data analysis and pattern discovery"},
                         {"letter": "B", "text": "Strategic planning and recommendations"},
-                        {"letter": "C", "text": "Technical system design"}
+                        {"letter": "C", "text": "Technical system design"},
+                        {"letter": "D", "text": "Operational/process optimization"},
                     ]
                 },
                 {
@@ -150,51 +78,48 @@ Make it relevant to the role and return JSON:
                     "options": [
                         {"letter": "A", "text": "Finance/Banking"},
                         {"letter": "B", "text": "Healthcare/Life Sciences"},
-                        {"letter": "C", "text": "Technology/E-commerce"}
+                        {"letter": "C", "text": "Technology/E‑commerce"},
+                        {"letter": "D", "text": "Other"},
                     ]
                 },
                 {
                     "question": "What case complexity do you prefer?",
                     "options": [
-                        {"letter": "A", "text": "Well-defined problems with clear goals"},
-                        {"letter": "B", "text": "Exploratory analysis with ambiguity"},
-                        {"letter": "C", "text": "Mixed - both structured and exploratory"}
+                        {"letter": "A", "text": "Well‑defined problems with clear metrics"},
+                        {"letter": "B", "text": "Open‑ended exploratory analysis"},
+                        {"letter": "C", "text": "Mixed – structured and exploratory"},
+                        {"letter": "D", "text": "Real‑time decision making"},
                     ]
-                }
+                },
             ]
-            question_data = fallback_questions[mcq_current]
-        
-        # Format message
-        mcq_message = f"""📋 **Classification Question {mcq_current + 1} **
+            question_data = fallback_questions[min(mcq_current, len(fallback_questions) - 1)]
 
-**{question_data['question']}**
-
-"""
+        # Now question_data is guaranteed to have 'question' and 'options'
+        mcq_message = f"📋 Classification Question {mcq_current + 1}\n {question_data['question']}\n\n"
         for opt in question_data['options']:
             mcq_message += f"{opt['letter']}. {opt['text']}\n"
-        
-        mcq_message += "\nPlease respond with your answer (A, B, or C)"
-        
-        # Store the current question
+        mcq_message += "\nPlease respond with your answer (A, B, C, or D)"
+
         current_questions = state.get('mcq_questions', [])
         current_questions.append(question_data)
-        
+
         return {
             "mcq_questions": current_questions,
             "mcq_current_question": mcq_current + 1,
             "messages": [AIMessage(content=mcq_message)],
-            "current_activity": "awaiting_mcq_answer"
+            "current_activity": "awaiting_mcq_answer",
         }
-    
+
     def process_mcq_answers_node(self, state: dict) -> dict:
         """Process MCQ answers to determine domain, industry, and case type."""
         mcq_questions = state.get('mcq_questions', [])
-        mcq_answers = state.get('mcq_answers', [])
+        classification_answers = state.get('classification_answers', [])
+
         role = state.get('role', '')
         skills = ', '.join(state.get('skills', []))
         
         llm = get_llm_for_task('fast', temperature=0.5)
-        prompt = CaseInterviewPrompts.interpret_mcq_answers(mcq_questions,mcq_answers,role,skills)
+        prompt = CaseInterviewPrompts.interpret_mcq_answers(mcq_questions,classification_answers,role,skills)
         
     
         
@@ -659,137 +584,8 @@ Return ONLY the question text."""
         }
     
     # ========== FOLLOWUP PHASE ==========
-    
-    def followup_node(self, state: dict) -> dict:
-        """Follow-up phase - 3 focused questions generated by LLM, one question each."""
-        messages = state.get('messages', [])
-        case_study = state.get('case_study', {})
-        role = state.get('role', 'Analyst')
-        count = state.get('followup_question_count', 0)
-        max_questions = 3
-        
-        company_name = case_study.get('company_name', 'the company')
-        problem = case_study.get('problem_statement', '')
-        
-        # Get last human response
-        last_human_msg = None
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                last_human_msg = msg.content
-                break
-        
-        # Get candidate's approach/previous responses for context
-        recent_responses = []
-        for msg in reversed(messages[:10]):
-            if isinstance(msg, HumanMessage):
-                recent_responses.insert(0, msg.content)
-                if len(recent_responses) >= 2:
-                    break
-        
-        print(f"DEBUG: Followup - count={count}/{max_questions}, has_response={bool(last_human_msg)}")
-        
-        # Check if complete
-        if count >= max_questions:
-            print(f"DEBUG: Followup COMPLETE")
-            return {
-                "followup_complete": True,
-                "current_activity": "phase_complete"
-            }
-        
-        # Wait for response if needed
-        if count > 0 and not last_human_msg:
-            print(f"DEBUG: Waiting for response to question {count}")
-            return {
-                "current_activity": "awaiting_followup"
-            }
-        
-        # Generate LLM-based question
-        llm = get_llm_for_task('conversation', temperature=0.7)
-        
-        # Define focus for each question
-        question_focuses = {
-            0: {
-                "topic": "Recommendations",
-                "instruction": "Ask them to provide their top recommendations for {company_name}. Focus on WHAT they recommend and WHY it's important. Keep it as ONE clear question without numbered sub-points."
-            },
-            1: {
-                "topic": "Implementation",
-                "instruction": "Ask about HOW they would implement their recommendation at {company_name}. Focus on practical execution. Keep it as ONE clear question without numbered sub-points."
-            },
-            2: {
-                "topic": "Success Metrics",
-                "instruction": "Ask how they would measure success for {company_name}. Focus on specific metrics and expected outcomes. Keep it as ONE clear question without numbered sub-points."
-            }
-        }
-        
-        focus = question_focuses.get(count, question_focuses[0])
-        
-        system_prompt = f"""You are conducting follow-up phase question {count + 1} of {max_questions}.
 
-    CRITICAL: ONLY mention "{company_name}"!
 
-    **Case:** {company_name} - {problem}
-    **Role:** {role}
-
-    **Candidate's Recent Response:**
-    {last_human_msg[:500] if last_human_msg else "Initial approach provided"}
-
-    **YOUR TASK:**
-    {focus["instruction"]}
-
-    **Focus on: {focus["topic"]}**
-
-    **CRITICAL RULES:**
-    1. Generate ONLY ONE focused question - NO sub-questions, NO numbered lists
-    2. Make it open-ended but specific to {company_name}
-    3. Reference what the candidate said previously if relevant
-    4. Keep it under 60 words
-    5. NO markdown formatting, NO bullet points, just a single clear question
-    6. The question should flow naturally in conversation
-
-    GOOD EXAMPLE: "Based on your analysis, what are the most critical recommendations you would make to {company_name}'s leadership, and why do you believe these will address their core problem?"
-
-    BAD EXAMPLE: "What are your recommendations for {company_name}? Please include: 1. Priority order 2. Expected impact 3. Timeline"
-
-    Return ONLY the single question text."""
-        
-        try:
-            response = llm.invoke([SystemMessage(content=system_prompt)])
-            question_text = response.content.strip().replace('**', '').replace('*', '').replace('\n\n', ' ')
-            
-            # Extra cleaning to remove any numbered lists that might slip through
-            import re
-            question_text = re.sub(r'\n\d+\.', '', question_text)
-            question_text = re.sub(r'^\d+\.', '', question_text)
-            question_text = question_text.strip()
-            
-        except Exception as e:
-            print(f"DEBUG: Error generating question: {e}")
-            # Simple fallback questions without sub-points
-            fallbacks = {
-                0: f"Based on your analysis, what are the most critical recommendations you would make to {company_name}'s leadership?",
-                1: f"How would you approach implementing your top recommendation at {company_name}?",
-                2: f"What specific metrics would you use to measure success for {company_name}?"
-            }
-            question_text = fallbacks.get(count, f"What would be your next step for {company_name}?")
-        
-        print(f"DEBUG: Generated followup question {count + 1}/{max_questions}")
-        
-        return {
-            "messages": [AIMessage(content=question_text)],
-            "followup_question_count": count + 1,
-            "current_activity": "awaiting_followup"
-        }
-
-    def followup_evaluation_node(self, state: dict) -> dict:
-        """Silent evaluation of followup phase."""
-        evaluation = self._evaluate_phase(state, 'followup')
-        
-        return {
-            "followup_evaluation": evaluation,
-            "current_phase": "final",
-            "current_activity": "generating_report"
-        }
     
     # ========== FINAL EVALUATION ==========
     
