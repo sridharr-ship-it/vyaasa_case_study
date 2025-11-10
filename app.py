@@ -122,34 +122,34 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 
-# ==================== SESSION STATE INITIALIZATION ====================
 def initialize_session_state():
     """Initialize all session state variables"""
     defaults = {
         'initialized': False,
         'messages': [],
-        'candidate_name': "",
-        'role': "",
+        'candidate_name': '',
+        'role': '',
         'skills': [],
         'interview_state': {},
         'graph': None,
         'nodes': None,
         'start_time': None,
-        'current_page': "welcome",
-        'approach_framework': "",
-        'approach_technical': "",
-        'approach_code': "# Write your code here...\n\n",
-        'approach_implementation': "",
-        'code_language': "python",
+        'current_page': 'welcome',
+        'approach_framework': '',
+        'approach_technical': '',
+        'approach_code': 'Write your code here...',
+        'approach_implementation': '',
+        'code_language': 'python',
         'debug_mode': False,
         'ai_processing': False,
-        'waiting_for_user': False
+        'waiting_for_user': False,
+        'awaiting_custom_industry': False,  # ADD THIS
+        'temp_q2_answer': ''                 # ADD THIS
     }
     
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
-
 
 # ==================== UTILITY FUNCTIONS ====================
 def format_time_remaining(seconds: int) -> str:
@@ -161,13 +161,13 @@ def format_time_remaining(seconds: int) -> str:
 
 def calculate_progress(state: Dict) -> float:
     """Calculate overall interview progress percentage"""
-    total_questions = 3 + 3 + 4 + 3
+    total_questions = 3 + 3 + 4 
     completed = 0
     if state.get('mcq_completed'):
         completed += 3
     completed += state.get('understanding_question_count', 0)
     completed += state.get('approach_question_count', 0)
-    completed += state.get('followup_question_count', 0)
+  
     return (completed / total_questions) * 100
 
 
@@ -218,7 +218,6 @@ def render_phase_status():
         'classification': ('📋', 'Classification Assessment', 'MCQ Questions'),
         'understanding': ('🤔', 'Problem Understanding', 'Clarifying Questions'),
         'approach': ('🎯', 'Solution Approach', 'Framework Development'),
-        'followup': ('💬', 'Deep Dive', 'Follow-up Discussion'),
         'final': ('📊', 'Final Evaluation', 'Comprehensive Feedback')
     }
     
@@ -461,11 +460,11 @@ def welcome_page():
                         'mcq_completed': False,
                         'understanding_complete': False,
                         'approach_complete': False,
-                        'followup_complete': False,
+                       
                         'interview_complete': False,
                         'understanding_question_count': 0,
                         'approach_question_count': 0,
-                        'followup_question_count': 0,
+                       
                         'start_time': time.time()
                     }
                     
@@ -477,7 +476,6 @@ def welcome_page():
                 time.sleep(1)
                 st.rerun()
 
-
 def mcq_phase():
     """MCQ Classification Phase"""
     apply_custom_css()
@@ -485,7 +483,6 @@ def mcq_phase():
     
     state = st.session_state.interview_state
     
-    # If already completed, redirect
     if state.get('mcq_completed'):
         st.session_state.current_page = "interview"
         st.rerun()
@@ -501,7 +498,6 @@ def mcq_phase():
     mcq_questions = state.get('mcq_questions', [])
     answers = state.get('classification_answers', [])
     
-    # Generate questions one at a time
     if len(mcq_questions) < 3:
         if len(mcq_questions) == len(answers):
             with st.spinner(f"Generating question {len(mcq_questions) + 1}/3..."):
@@ -537,6 +533,7 @@ def mcq_phase():
             st.success(f"✅ Your answer: {answers[idx]}")
         else:
             if idx == len(answers):
+                # Display answer buttons
                 for opt_idx, option in enumerate(options):
                     if isinstance(option, dict):
                         option_text = option.get('text', str(option))
@@ -553,9 +550,45 @@ def mcq_phase():
                         use_container_width=True
                     ):
                         new_answers = st.session_state.interview_state.get('classification_answers', []).copy()
-                        new_answers.append(option_text)
-                        st.session_state.interview_state['classification_answers'] = new_answers
-                        st.rerun()
+                        
+                        # Check if Question 2 (idx=1) and Option D (opt_idx=3) - "Other"
+                        if idx == 1 and opt_idx == 3:
+                            st.session_state['awaiting_custom_industry'] = True
+                            st.session_state['temp_q2_answer'] = option_text
+                            st.rerun()
+                        else:
+                            new_answers.append(option_text)
+                            st.session_state.interview_state['classification_answers'] = new_answers
+                            st.rerun()
+                
+                # Show custom industry input if "Other" was selected in Q2
+                if idx == 1 and st.session_state.get('awaiting_custom_industry', False):
+                    st.markdown("---")
+                    st.info("📝 Please specify your preferred industry:")
+                    
+                    # Create unique keys based on current answer count
+                    answers_count = len(st.session_state.interview_state.get('classification_answers', []))
+                    custom_industry_key = f"custom_industry_input_{answers_count}"
+                    confirm_btn_key = f"confirm_industry_btn_{answers_count}"
+                    
+                    custom_industry = st.text_input(
+                        label="Your Industry Preference",
+                        placeholder="e.g., Manufacturing, Retail, Healthcare",
+                        key=custom_industry_key
+                    )
+                    
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col2:
+                        if st.button("✅ Confirm", use_container_width=True, type="primary", key=confirm_btn_key):
+                            if custom_industry.strip():
+                                new_answers = st.session_state.interview_state.get('classification_answers', []).copy()
+                                new_answers.append(custom_industry.strip())
+                                st.session_state.interview_state['classification_answers'] = new_answers
+                                st.session_state['awaiting_custom_industry'] = False
+                                st.session_state.pop('temp_q2_answer', None)
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ Please enter an industry name.")
             else:
                 st.info("👆 Please answer the previous question first")
         
@@ -574,7 +607,6 @@ def mcq_phase():
                         st.session_state.interview_state['mcq_completed'] = True
                         st.session_state.interview_state['current_phase'] = 'understanding'
                         
-                        # Clear MCQ data
                         st.session_state.interview_state['mcq_questions'] = []
                         st.session_state.interview_state['classification_answers'] = []
                         
@@ -585,7 +617,6 @@ def mcq_phase():
                         if st.session_state.debug_mode:
                             import traceback
                             st.code(traceback.format_exc())
-
 
 def interview_phase():
     """Main interview phase"""
@@ -618,9 +649,7 @@ def interview_phase():
                 except Exception as e:
                     st.session_state.ai_processing = False
                     st.error(f"Error generating case: {str(e)}")
-                    if st.session_state.debug_mode:
-                        import traceback
-                        st.code(traceback.format_exc())
+                 
                     return
         return
     
@@ -659,17 +688,9 @@ def interview_phase():
                     if st.session_state.interview_state.get('approach_complete'):
                         eval_result = nodes.approach_evaluation_node(st.session_state.interview_state)
                         st.session_state.interview_state.update(eval_result)
-                        st.session_state.interview_state['current_phase'] = 'followup'
-                        
-                elif current_phase == 'followup':
-                    result = nodes.followup_node(state)
-                    st.session_state.interview_state.update(result)
-                    
-                    if st.session_state.interview_state.get('followup_complete'):
-                        eval_result = nodes.followup_evaluation_node(st.session_state.interview_state)
-                        st.session_state.interview_state.update(eval_result)
                         st.session_state.interview_state['current_phase'] = 'final'
                         
+                
                 elif current_phase == 'final':
                     result = nodes.final_evaluation_node(state)
                     st.session_state.interview_state.update(result)
@@ -682,9 +703,7 @@ def interview_phase():
             except Exception as e:
                 st.session_state.ai_processing = False
                 st.error(f"Error: {str(e)}")
-                if st.session_state.debug_mode:
-                    import traceback
-                    st.code(traceback.format_exc())
+                
         return
     
     # Reset AI processing flag
@@ -734,78 +753,107 @@ def generate_chat_transcript() -> str:
     messages = state.get('messages', [])
     
     transcript = []
-    transcript.append("=" * 80)
-    transcript.append("TECHNICAL CASE INTERVIEW - CHAT TRANSCRIPT")
-    transcript.append("=" * 80)
-    transcript.append(f"\nCandidate: {st.session_state.candidate_name}")
-    transcript.append(f"Target Role: {st.session_state.role}")
-    transcript.append(f"Skills: {', '.join(st.session_state.skills)}")
-    transcript.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    transcript.append(f"Duration: {format_time_remaining(int(time.time() - st.session_state.start_time))}")
-    transcript.append("\n" + "=" * 80)
+    transcript.append('=' * 80)
+    transcript.append('TECHNICAL CASE INTERVIEW - CHAT TRANSCRIPT')
+    transcript.append('=' * 80)
+    transcript.append('')
     
-    # Add case study details
-    case_study = state.get('case_study', {})
-    if case_study:
-        transcript.append("\n\nCASE STUDY DETAILS")
-        transcript.append("-" * 80)
-        transcript.append(f"Domain: {case_study.get('domain', 'N/A')}")
-        transcript.append(f"Type: {state.get('tech_type', 'N/A')}")
-        transcript.append(f"\nScenario:\n{case_study.get('scenario', 'N/A')}")
-        transcript.append(f"\nObjective:\n{case_study.get('objective', 'N/A')}")
+    # Candidate Information
+    transcript.append(f'Candidate: {st.session_state.candidate_name}')
+    transcript.append(f'Target Role: {st.session_state.role}')
+    skills_str = ', '.join(st.session_state.skills) if st.session_state.skills else 'Not specified'
+    transcript.append(f'Skills: {skills_str}')
+    transcript.append(f'Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    duration = format_time_remaining(int(time.time() - st.session_state.start_time))
+    transcript.append(f'Duration: {duration}')
+    transcript.append('')
+    transcript.append('=' * 80)
+    
+    # Case Study Details - PROPERLY FORMAT
+    case_study = state.get('case_study')
+    if case_study and isinstance(case_study, dict):
+        transcript.append('CASE STUDY DETAILS')
+        transcript.append('-' * 80)
+        transcript.append(f'Domain: {case_study.get("domain", "N/A")}')
+        transcript.append(f'Type: {state.get("tech_type", "N/A")}')
+        
+        scenario = case_study.get('scenario')
+        if scenario:
+            transcript.append(f'Scenario: {scenario}')
+        
+        objective = case_study.get('objective')
+        if objective:
+            transcript.append(f'Objective: {objective}')
         
         constraints = case_study.get('constraints', [])
         if constraints:
-            transcript.append(f"\nConstraints:")
+            transcript.append('Constraints:')
             for i, constraint in enumerate(constraints, 1):
-                transcript.append(f"  {i}. {constraint}")
+                transcript.append(f'  {i}. {constraint}')
+        
+        transcript.append('')
+        transcript.append('=' * 80)
     
-    # Add conversation
-    transcript.append("\n\n" + "=" * 80)
-    transcript.append("INTERVIEW CONVERSATION")
-    transcript.append("=" * 80 + "\n")
+    # Interview Conversation - DETECT PHASES PROPERLY
+    transcript.append('INTERVIEW CONVERSATION')
+    transcript.append('=' * 80)
+    transcript.append('')
     
     current_phase = None
     msg_count = 0
     
     for msg in messages:
-        # Detect phase changes based on message content
+        # Detect phase changes from message content
         if isinstance(msg, AIMessage):
             content_lower = msg.content.lower()
-            if 'understanding' in content_lower and current_phase != 'understanding':
-                current_phase = 'understanding'
-                transcript.append(f"\n{'=' * 80}")
-                transcript.append("PHASE: PROBLEM UNDERSTANDING")
-                transcript.append("=" * 80 + "\n")
-            elif 'approach' in content_lower and current_phase != 'approach':
-                current_phase = 'approach'
-                transcript.append(f"\n{'=' * 80}")
-                transcript.append("PHASE: SOLUTION APPROACH")
-                transcript.append("=" * 80 + "\n")
-            elif 'follow' in content_lower and current_phase != 'followup':
-                current_phase = 'followup'
-                transcript.append(f"\n{'=' * 80}")
-                transcript.append("PHASE: FOLLOW-UP DISCUSSION")
-                transcript.append("=" * 80 + "\n")
-        
-        msg_count += 1
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        
-        if isinstance(msg, AIMessage):
-            transcript.append(f"[{timestamp}] CASE STUDY (Vyaasa):")
-            transcript.append("-" * 80)
-            transcript.append(f"{msg.content}\n")
-        elif isinstance(msg, HumanMessage):
-            transcript.append(f"[{timestamp}] CANDIDATE ({st.session_state.candidate_name}):")
-            transcript.append("-" * 80)
-            transcript.append(f"{msg.content}\n")
-    
-    transcript.append("\n" + "=" * 80)
-    transcript.append(f"END OF TRANSCRIPT - Total Messages: {msg_count}")
-    transcript.append("=" * 80)
-    
-    return "\n".join(transcript)
+            
+            detected_phase = None
+            if 'problem understanding' in content_lower or 'clarify' in content_lower:
+                detected_phase = 'understanding'
+            elif 'approach' in content_lower or 'solution' in content_lower:
+                detected_phase = 'approach'
+ 
+            elif 'evaluation' in content_lower or 'final score' in content_lower:
+                detected_phase = 'final'
+            
+            # Add phase header when phase changes
+            if detected_phase and current_phase != detected_phase:
+                current_phase = detected_phase
+                phase_names = {
+                    'understanding': 'PROBLEM UNDERSTANDING',
+                    'approach': 'SOLUTION APPROACH',
 
+                    'final': 'FINAL EVALUATION'
+                }
+                transcript.append('')
+                transcript.append('=' * 80)
+                transcript.append(f'PHASE: {phase_names.get(current_phase, current_phase.upper())}')
+                transcript.append('=' * 80)
+                transcript.append('')
+        
+        # Add message to transcript
+        if isinstance(msg, AIMessage):
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            transcript.append(f'[{timestamp}] CASE STUDY (Vyaasa):')
+            transcript.append('-' * 80)
+            transcript.append(msg.content)
+            transcript.append('')
+            msg_count += 1
+        
+        elif isinstance(msg, HumanMessage):
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            transcript.append(f'[{timestamp}] CANDIDATE ({st.session_state.candidate_name}):')
+            transcript.append('-' * 80)
+            transcript.append(msg.content)
+            transcript.append('')
+            msg_count += 1
+    
+    transcript.append('')
+    transcript.append('=' * 80)
+    transcript.append(f'END OF TRANSCRIPT - Total Messages: {msg_count}')
+    transcript.append('=' * 80)
+    
+    return '\n'.join(transcript)
 
 def generate_evaluation_report() -> str:
     """Generate a comprehensive evaluation report"""
@@ -827,12 +875,12 @@ def generate_evaluation_report() -> str:
     
     understanding_eval = state.get('understanding_evaluation', {})
     approach_eval = state.get('approach_evaluation', {})
-    followup_eval = state.get('followup_evaluation', {})
+
     
     understanding_score = understanding_eval.get('score', 0)
     approach_score = approach_eval.get('score', 0)
-    followup_score = followup_eval.get('score', 0)
-    total_score = understanding_score + approach_score + followup_score
+
+    total_score = understanding_score + approach_score 
     
     report.append(f"\n1. Problem Understanding Phase: {understanding_score}/10")
     if understanding_eval.get('feedback'):
@@ -842,9 +890,6 @@ def generate_evaluation_report() -> str:
     if approach_eval.get('feedback'):
         report.append(f"   Feedback: {approach_eval['feedback']}")
     
-    report.append(f"\n3. Follow-up Discussion Phase: {followup_score}/10")
-    if followup_eval.get('feedback'):
-        report.append(f"   Feedback: {followup_eval['feedback']}")
     
     report.append(f"\n{'─' * 80}")
     report.append(f"TOTAL SCORE: {total_score}/30")
@@ -936,8 +981,7 @@ def create_interview_report_zip() -> bytes:
         "interview_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         "scores": {
             "understanding": state.get('understanding_evaluation', {}).get('score', 0),
-            "approach": state.get('approach_evaluation', {}).get('score', 0),
-            "followup": state.get('followup_evaluation', {}).get('score', 0)
+            "approach": state.get('approach_evaluation', {}).get('score', 0)
         },
         "domain": state.get('case_study', {}).get('domain', 'N/A'),
         "tech_type": state.get('tech_type', 'N/A')
@@ -974,7 +1018,7 @@ def results_page():
     
     st.markdown("## 📊 Your Performance Report")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         understanding_score = state.get('understanding_evaluation', {}).get('score', 0)
@@ -984,9 +1028,7 @@ def results_page():
         approach_score = state.get('approach_evaluation', {}).get('score', 0)
         st.metric("Approach Phase", f"{approach_score}/10")
     
-    with col3:
-        followup_score = state.get('followup_evaluation', {}).get('score', 0)
-        st.metric("Follow-up Phase", f"{followup_score}/10")
+   
     
     st.markdown("---")
     
@@ -1043,9 +1085,7 @@ def results_page():
             
         except Exception as e:
             st.error(f"Error generating report: {str(e)}")
-            if st.session_state.debug_mode:
-                import traceback
-                st.code(traceback.format_exc())
+            
     
     with col2:
         if st.button("🔄 Start New Interview", use_container_width=True):
@@ -1072,7 +1112,6 @@ def render_sidebar():
                 'Classification': state.get('mcq_completed', False),
                 'Understanding': state.get('understanding_complete', False),
                 'Approach': state.get('approach_complete', False),
-                'Follow-up': state.get('followup_complete', False),
                 'Final': state.get('interview_complete', False)
             }
             
@@ -1082,20 +1121,7 @@ def render_sidebar():
             
             st.markdown("---")
             
-            st.session_state.debug_mode = st.checkbox("🐛 Debug Mode", value=st.session_state.debug_mode)
             
-            if st.session_state.debug_mode:
-                st.markdown("### Debug Info")
-                st.json({
-                    'current_page': st.session_state.current_page,
-                    'current_phase': state.get('current_phase'),
-                    'message_count': len(state.get('messages', [])),
-                    'ai_processing': st.session_state.ai_processing,
-                    'case_study_generated': bool(state.get('case_study')),
-                    'approach_count': state.get('approach_question_count', 0)
-                })
-            
-            st.markdown("---")
             
             if st.button("🔄 Restart Case study", use_container_width=True):
                 for key in list(st.session_state.keys()):
