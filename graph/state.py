@@ -1,11 +1,12 @@
-# graph/state.py - COMPLETE WITH SEPARATE PHASE COUNTERS
+# graph/state.py - Updated with only Understanding and Approach phases
+
 from typing import TypedDict, List, Dict, Any, Optional
 from typing_extensions import Annotated
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 class InterviewState(TypedDict):
-    """State for case study interview system with separate phase counters."""
+    """State for case study interview system with Understanding and Approach phases only."""
     
     # Candidate Information
     candidate_name: str
@@ -21,18 +22,15 @@ class InterviewState(TypedDict):
     mcq_answers: List[str]
     mcq_current_question: int
     mcq_completed: bool
+    classification_answers: List[str]
     
     # Phase Management
     current_phase: str
     current_activity: str
     
-    # SEPARATE COUNTERS FOR EACH PHASE (KEY FIX)
+    # Phase Counters (Only Understanding and Approach)
     understanding_question_count: int
     approach_question_count: int
-    followup_question_count: int
-    
-    # Deprecated - kept for backward compatibility
-    phase_question_count: int
     
     # Phase max questions
     phase_max_questions: Dict[str, int]
@@ -40,7 +38,6 @@ class InterviewState(TypedDict):
     # Phase Completion Flags
     understanding_complete: bool
     approach_complete: bool
-    followup_complete: bool
     interview_complete: bool
     
     # Timer
@@ -60,7 +57,6 @@ class InterviewState(TypedDict):
     # Evaluations
     understanding_evaluation: Dict[str, Any]
     approach_evaluation: Dict[str, Any]
-    followup_evaluation: Dict[str, Any]
     final_evaluation: Dict[str, Any]
     
     # Performance Signals
