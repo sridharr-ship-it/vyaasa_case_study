@@ -1,3 +1,5 @@
+--- START OF FILE interview_nodes.py ---
+
 
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -639,13 +641,13 @@ Return ONLY the question text."""
                 "strengths": ["Engaged with the problem"],
                 "weaknesses": ["Could provide more depth"],
                 "key_observations": ["Demonstrated basic understanding"],
-                "candidate_key_responses": candidate_responses[:2],
-                "overall_comment": "Satisfactory performance"
+                "candidate_key_responses": candidate_responses[:2] if candidate_responses else ["No response recorded."],
+                "overall_comment": "Satisfactory performance. Could benefit from deeper probing."
             }
         
         # Ensure responses are included
-        if 'candidate_key_responses' not in evaluation:
-            evaluation['candidate_key_responses'] = candidate_responses[:2]
+        if 'candidate_key_responses' not in evaluation or not evaluation['candidate_key_responses']:
+            evaluation['candidate_key_responses'] = candidate_responses[:2] if candidate_responses else ["No response recorded."]
         
         return evaluation
 
@@ -725,7 +727,7 @@ Return ONLY the question text."""
         "candidate_response_excerpt": "..."
         }},
         {{
-        "dimension": "Communication & Clarity",
+        "dimension": "Clarity",
         "weight": 15,
         "score": 8.5,
         "justification": "...",
@@ -770,31 +772,37 @@ Return ONLY the question text."""
             final_eval = {
                 "overall_score": 7.0,
                 "performance_level": "Satisfactory",
-                "interview_summary": "Candidate demonstrated understanding of the problem.",
+                "interview_summary": "Candidate demonstrated a solid understanding of the core problem and proposed a reasonable approach. Further development is needed in probing for unstated assumptions and detailing technical implementations.",
                 "dimension_scores": [
                     {
                         "dimension": "Domain Expertise & Technical Skills",
                         "weight": 25,
                         "score": 7.0,
-                        "justification": "Adequate technical knowledge",
+                        "justification": "Showed adequate technical knowledge for the role but could provide more specific examples.",
                         "candidate_response_excerpt": candidate_responses[-3] if len(candidate_responses) >= 3 else "N/A"
                     },
                     {
                         "dimension": "Problem-Solving Skills & Critical Thinking",
                         "weight": 15,
-                        "score": 7.0,
-                        "justification": "Structured problem-solving approach",
+                        "score": 7.5,
+                        "justification": "Effectively broke down the problem into manageable components.",
                         "candidate_response_excerpt": candidate_responses[-2] if len(candidate_responses) >= 2 else "N/A"
+                    },
+                    {
+                        "dimension": "Structured Thinking",
+                        "weight": 15,
+                        "score": 8.0,
+                        "justification": "Presented a logical and well-organized framework for their approach.",
+                        "candidate_response_excerpt": candidate_responses[-1] if candidate_responses else "N/A"
                     }
                 ],
-                "key_strengths": ["Clear communication", "Structured thinking"],
-                "development_areas": ["Deeper analysis", "More specific recommendations"],
+                "key_strengths": ["Clear and concise communication", "Logical problem structuring", "Maintained professional demeanor"],
+                "development_areas": ["Deeper technical analysis is needed", "Consider edge cases and potential risks more thoroughly", "Proactively ask for clarifying data"],
                 "phase_breakdown": {
-                    "understanding": "Good grasp of core issues",
-                    "approach": "Reasonable framework proposed",
-                    "followup": "Handled questions adequately"
+                    "understanding": "Good grasp of the core issues, but could have asked more probing questions.",
+                    "approach": "A reasonable and structured framework was proposed. Lacked some detail on implementation."
                 },
-                "recommended_next_steps": ["Practice more cases", "Deepen technical knowledge"]
+                "recommended_next_steps": ["Practice more complex case studies", "Deepen knowledge of specific algorithms relevant to the domain", "Focus on anticipating potential roadblocks in project plans"]
             }
         
         # Format comprehensive report
@@ -822,10 +830,10 @@ Return ONLY the question text."""
         # Add detailed dimension scores with responses
         for dim in final_eval.get('dimension_scores', []):
             report += f"""
-    **{dim['dimension']}** (Weight: {dim['weight']}%)
-    - Score: {dim['score']}/10
-    - Justification: {dim['justification']}
-    - Candidate Response: "{dim['candidate_response_excerpt'][:200]}..."
+    **{dim.get('dimension', 'N/A')}** (Weight: {dim.get('weight', 0)}%)
+    - Score: {dim.get('score', 0)}/10
+    - Justification: {dim.get('justification', 'N/A')}
+    - Candidate Response: "{dim.get('candidate_response_excerpt', 'N/A')[:200]}..."
     """
         
         report += "\n---\n\n**✅ KEY STRENGTHS:**\n"
@@ -840,7 +848,7 @@ Return ONLY the question text."""
         breakdown = final_eval.get('phase_breakdown', {})
         report += f"\n**Understanding Phase:** {breakdown.get('understanding', 'N/A')}"
         report += f"\n**Approach Phase:** {breakdown.get('approach', 'N/A')}"
-        report += f"\n**Follow-up Phase:** {breakdown.get('followup', 'N/A')}"
+
         
         report += "\n\n---\n\n**🎯 RECOMMENDED NEXT STEPS:**\n"
         for step in final_eval.get('recommended_next_steps', []):
