@@ -1,6 +1,3 @@
---- START OF FILE app.py ---
-
-# app.py - FINAL VERSION WITH VS CODE EDITOR
 
 import streamlit as st
 import time
