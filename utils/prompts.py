@@ -15,7 +15,7 @@ Context:
 
 Based on the question number, focus on:
 - Question 1: Problem-solving preferences (Analytical/data-driven vs Strategic/business vs Technical/implementation vs Operational/process optimization)
-- Question 2: Industry preference (2 industries most relevant to {role}, 1 alternative industry, 1 "Other" option)
+- Question 2: Industry preference (3 industries most relevant to {role} along with the {skills} ,  1 "Other" option)
 - Question 3: Case complexity preference (Structured problems with clear metrics vs Open-ended exploratory analysis vs Mixed approach with ambiguity vs Real-time decision making under uncertainty)
 
 Requirements:
