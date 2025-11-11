@@ -1,3 +1,5 @@
+--- START OF FILE app.py ---
+
 # app.py - FINAL VERSION WITH VS CODE EDITOR
 
 import streamlit as st
@@ -769,76 +771,35 @@ def generate_chat_transcript() -> str:
     transcript.append('')
     transcript.append('=' * 80)
     
-    # Case Study Details - PROPERLY FORMAT
+    # Case Study Details
     case_study = state.get('case_study')
     if case_study and isinstance(case_study, dict):
         transcript.append('CASE STUDY DETAILS')
         transcript.append('-' * 80)
-        transcript.append(f'Domain: {case_study.get("domain", "N/A")}')
-        transcript.append(f'Type: {state.get("tech_type", "N/A")}')
-        
-        scenario = case_study.get('scenario')
-        if scenario:
-            transcript.append(f'Scenario: {scenario}')
-        
-        objective = case_study.get('objective')
-        if objective:
-            transcript.append(f'Objective: {objective}')
-        
-        constraints = case_study.get('constraints', [])
-        if constraints:
-            transcript.append('Constraints:')
-            for i, constraint in enumerate(constraints, 1):
-                transcript.append(f'  {i}. {constraint}')
-        
+        transcript.append(f'Title: {case_study.get("title", "N/A")}')
+        transcript.append(f'Company: {case_study.get("company_name", "N/A")}')
+        transcript.append(f'Domain: {state.get("domain", "N/A")}')
+        transcript.append(f'Case Type: {state.get("case_type", "N/A")}')
+        transcript.append(f'Technical Type: {state.get("tech_type", "N/A")}')
+        transcript.append('\nSITUATION:')
+        transcript.append(f'{case_study.get("situation", "N/A")}')
+        transcript.append('\nPROBLEM STATEMENT:')
+        transcript.append(f'{case_study.get("problem_statement", "N/A")}')
         transcript.append('')
         transcript.append('=' * 80)
     
-    # Interview Conversation - DETECT PHASES PROPERLY
+    # Interview Conversation
     transcript.append('INTERVIEW CONVERSATION')
     transcript.append('=' * 80)
     transcript.append('')
     
-    current_phase = None
-    msg_count = 0
-    
     for msg in messages:
-        # Detect phase changes from message content
-        if isinstance(msg, AIMessage):
-            content_lower = msg.content.lower()
-            
-            detected_phase = None
-            if 'problem understanding' in content_lower or 'clarify' in content_lower:
-                detected_phase = 'understanding'
-            elif 'approach' in content_lower or 'solution' in content_lower:
-                detected_phase = 'approach'
- 
-            elif 'evaluation' in content_lower or 'final score' in content_lower:
-                detected_phase = 'final'
-            
-            # Add phase header when phase changes
-            if detected_phase and current_phase != detected_phase:
-                current_phase = detected_phase
-                phase_names = {
-                    'understanding': 'PROBLEM UNDERSTANDING',
-                    'approach': 'SOLUTION APPROACH',
-
-                    'final': 'FINAL EVALUATION'
-                }
-                transcript.append('')
-                transcript.append('=' * 80)
-                transcript.append(f'PHASE: {phase_names.get(current_phase, current_phase.upper())}')
-                transcript.append('=' * 80)
-                transcript.append('')
-        
-        # Add message to transcript
         if isinstance(msg, AIMessage):
             timestamp = datetime.now().strftime('%H:%M:%S')
             transcript.append(f'[{timestamp}] CASE STUDY (Vyaasa):')
             transcript.append('-' * 80)
             transcript.append(msg.content)
             transcript.append('')
-            msg_count += 1
         
         elif isinstance(msg, HumanMessage):
             timestamp = datetime.now().strftime('%H:%M:%S')
@@ -846,11 +807,10 @@ def generate_chat_transcript() -> str:
             transcript.append('-' * 80)
             transcript.append(msg.content)
             transcript.append('')
-            msg_count += 1
     
     transcript.append('')
     transcript.append('=' * 80)
-    transcript.append(f'END OF TRANSCRIPT - Total Messages: {msg_count}')
+    transcript.append(f'END OF TRANSCRIPT - Total Messages: {len(messages)}')
     transcript.append('=' * 80)
     
     return '\n'.join(transcript)
@@ -858,103 +818,86 @@ def generate_chat_transcript() -> str:
 def generate_evaluation_report() -> str:
     """Generate a comprehensive evaluation report"""
     state = st.session_state.interview_state
+    final_eval = state.get('final_evaluation', {})
+    case_study = state.get('case_study', {})
     
     report = []
     report.append("=" * 80)
     report.append("TECHNICAL CASE INTERVIEW - EVALUATION REPORT")
     report.append("=" * 80)
-    report.append(f"\nCandidate: {st.session_state.candidate_name}")
-    report.append(f"Target Role: {st.session_state.role}")
-    report.append(f"Skills: {', '.join(st.session_state.skills)}")
-    report.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Metadata
+    report.append("\nCandidate: " + st.session_state.candidate_name)
+    report.append("Target Role: " + st.session_state.role)
+    report.append("Date: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    report.append("Interview Duration: " + format_time_remaining(int(time.time() - st.session_state.start_time)))
+
+    # Case Context
     report.append("\n" + "=" * 80)
-    
-    # Phase Scores
-    report.append("\n\nPHASE SCORES")
+    report.append("CASE STUDY CONTEXT")
     report.append("-" * 80)
+    report.append(f'Title: {case_study.get("title", "N/A")}')
+    report.append(f'Company: {case_study.get("company_name", "N/A")}')
+    report.append(f'Problem: {case_study.get("problem_statement", "N/A")}')
     
-    understanding_eval = state.get('understanding_evaluation', {})
-    approach_eval = state.get('approach_evaluation', {})
-
-    
-    understanding_score = understanding_eval.get('score', 0)
-    approach_score = approach_eval.get('score', 0)
-
-    total_score = understanding_score + approach_score 
-    
-    report.append(f"\n1. Problem Understanding Phase: {understanding_score}/10")
-    if understanding_eval.get('feedback'):
-        report.append(f"   Feedback: {understanding_eval['feedback']}")
-    
-    report.append(f"\n2. Solution Approach Phase: {approach_score}/10")
-    if approach_eval.get('feedback'):
-        report.append(f"   Feedback: {approach_eval['feedback']}")
-    
-    
-    report.append(f"\n{'─' * 80}")
-    report.append(f"TOTAL SCORE: {total_score}/30")
-    
-    # Final Evaluation
-    final_eval = state.get('final_evaluation', {})
-    
-    if final_eval:
-        report.append("\n\n" + "=" * 80)
-        report.append("OVERALL ASSESSMENT")
-        report.append("=" * 80)
-        report.append(f"\n{final_eval.get('interview_summary', 'No summary available')}")
-        
-        # Dimension Scores
-        dimension_scores = final_eval.get('dimension_scores', [])
-        if dimension_scores:
-            report.append("\n\n" + "=" * 80)
-            report.append("DIMENSION-WISE EVALUATION")
-            report.append("=" * 80)
-            
-            for i, dim in enumerate(dimension_scores, 1):
-                report.append(f"\n{i}. {dim['dimension']}")
-                report.append(f"   Score: {dim['score']}/10 (Weight: {dim['weight']}%)")
-                report.append(f"   Justification: {dim['justification']}")
-                if 'candidate_response_excerpt' in dim:
-                    excerpt = dim['candidate_response_excerpt']
-                    report.append(f"   Your Response Excerpt: \"{excerpt[:200]}...\"")
-                report.append("")
-        
-        # Strengths
-        strengths = final_eval.get('key_strengths', [])
-        if strengths:
-            report.append("\n" + "=" * 80)
-            report.append("KEY STRENGTHS")
-            report.append("=" * 80)
-            for i, strength in enumerate(strengths, 1):
-                report.append(f"{i}. {strength}")
-        
-        # Development Areas
-        dev_areas = final_eval.get('development_areas', [])
-        if dev_areas:
-            report.append("\n\n" + "=" * 80)
-            report.append("DEVELOPMENT AREAS")
-            report.append("=" * 80)
-            for i, area in enumerate(dev_areas, 1):
-                report.append(f"{i}. {area}")
-        
-        # Recommendations
-        recommendations = final_eval.get('recommended_next_steps', [])
-        if recommendations:
-            report.append("\n\n" + "=" * 80)
-            report.append("RECOMMENDED NEXT STEPS")
-            report.append("=" * 80)
-            for i, rec in enumerate(recommendations, 1):
-                report.append(f"{i}. {rec}")
-    
-    # Interview Metadata
-    report.append("\n\n" + "=" * 80)
-    report.append("INTERVIEW METADATA")
+    # Overall Assessment
+    report.append("\n" + "=" * 80)
+    report.append("OVERALL ASSESSMENT")
     report.append("=" * 80)
-    case_study = state.get('case_study', {})
-    report.append(f"\nCase Domain: {case_study.get('domain', 'N/A')}")
-    report.append(f"Technical Type: {state.get('tech_type', 'N/A')}")
-    report.append(f"Questions Asked: {len(state.get('messages', []))}")
-    report.append(f"Interview Duration: {format_time_remaining(int(time.time() - st.session_state.start_time))}")
+    report.append(f"\nOverall Score: {final_eval.get('overall_score', 'N/A')} / 10")
+    report.append(f"Performance Level: {final_eval.get('performance_level', 'N/A')}")
+    report.append(f"\nSummary: {final_eval.get('interview_summary', 'No summary available.')}")
+        
+    # Dimension Scores
+    dimension_scores = final_eval.get('dimension_scores', [])
+    if dimension_scores:
+        report.append("\n\n" + "=" * 80)
+        report.append("DIMENSION-WISE EVALUATION")
+        report.append("=" * 80)
+        
+        for dim in dimension_scores:
+            report.append(f"\nDimension: {dim.get('dimension', 'N/A')} (Weight: {dim.get('weight', 0)}%)")
+            report.append(f"  - Score: {dim.get('score', 0)}/10")
+            report.append(f"  - Justification: {dim.get('justification', 'N/A')}")
+            excerpt = dim.get('candidate_response_excerpt', 'N/A')
+            report.append(f'  - Supporting Response: "{excerpt[:250]}..."')
+    
+    # Strengths
+    strengths = final_eval.get('key_strengths', [])
+    if strengths:
+        report.append("\n\n" + "=" * 80)
+        report.append("KEY STRENGTHS")
+        report.append("=" * 80)
+        for i, strength in enumerate(strengths, 1):
+            report.append(f"{i}. {strength}")
+    
+    # Development Areas
+    dev_areas = final_eval.get('development_areas', [])
+    if dev_areas:
+        report.append("\n\n" + "=" * 80)
+        report.append("AREAS FOR DEVELOPMENT")
+        report.append("=" * 80)
+        for i, area in enumerate(dev_areas, 1):
+            report.append(f"{i}. {area}")
+
+    # Phase Breakdown
+    phase_breakdown = final_eval.get('phase_breakdown', {})
+    if phase_breakdown:
+        report.append("\n\n" + "=" * 80)
+        report.append("PHASE-BY-PHASE BREAKDOWN")
+        report.append("=" * 80)
+        report.append(f"\nUnderstanding Phase: {phase_breakdown.get('understanding', 'N/A')}")
+        report.append(f"Approach Phase: {phase_breakdown.get('approach', 'N/A')}")
+        report.append(f"Follow-up Phase: {phase_breakdown.get('followup', 'N/A')}")
+        
+    # Recommendations
+    recommendations = final_eval.get('recommended_next_steps', [])
+    if recommendations:
+        report.append("\n\n" + "=" * 80)
+        report.append("RECOMMENDED NEXT STEPS")
+        report.append("=" * 80)
+        for i, rec in enumerate(recommendations, 1):
+            report.append(f"{i}. {rec}")
     
     report.append("\n\n" + "=" * 80)
     report.append("END OF EVALUATION REPORT")
@@ -974,16 +917,20 @@ def create_interview_report_zip() -> bytes:
     
     # Generate metadata JSON
     state = st.session_state.interview_state
+    final_eval = state.get('final_evaluation', {})
+    
     metadata = {
         "candidate_name": st.session_state.candidate_name,
         "role": st.session_state.role,
         "skills": st.session_state.skills,
         "interview_date": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        "scores": {
+        "overall_score": final_eval.get('overall_score', 'N/A'),
+        "performance_level": final_eval.get('performance_level', 'N/A'),
+        "phase_scores": {
             "understanding": state.get('understanding_evaluation', {}).get('score', 0),
             "approach": state.get('approach_evaluation', {}).get('score', 0)
         },
-        "domain": state.get('case_study', {}).get('domain', 'N/A'),
+        "case_domain": state.get('domain', 'N/A'),
         "tech_type": state.get('tech_type', 'N/A')
     }
     
@@ -1015,24 +962,21 @@ def results_page():
     """, unsafe_allow_html=True)
     
     state = st.session_state.interview_state
+    final_eval = state.get('final_evaluation', {})
     
     st.markdown("## 📊 Your Performance Report")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        understanding_score = state.get('understanding_evaluation', {}).get('score', 0)
-        st.metric("Understanding Phase", f"{understanding_score}/10")
+        overall_score = final_eval.get('overall_score', 0)
+        st.metric("Overall Score", f"{overall_score}/10")
     
     with col2:
-        approach_score = state.get('approach_evaluation', {}).get('score', 0)
-        st.metric("Approach Phase", f"{approach_score}/10")
-    
-   
-    
+        performance_level = final_eval.get('performance_level', 'N/A')
+        st.metric("Performance Level", performance_level)
+
     st.markdown("---")
-    
-    final_eval = state.get('final_evaluation', {})
     
     if final_eval:
         st.markdown("### 📝 Overall Assessment")
@@ -1043,10 +987,11 @@ def results_page():
         if dimension_scores:
             st.markdown("### 📊 Dimension Scores")
             for dim in dimension_scores:
-                with st.expander(f"{dim['dimension']} - {dim['score']}/10 (Weight: {dim['weight']}%)"):
-                    st.write(f"**Justification:** {dim['justification']}")
-                    if 'candidate_response_excerpt' in dim:
-                        st.info(f"**Your Response:** \"{dim['candidate_response_excerpt'][:200]}...\"")
+                with st.expander(f"{dim.get('dimension', 'N/A')} - {dim.get('score', 0)}/10 (Weight: {dim.get('weight', 0)}%)"):
+                    st.write(f"**Justification:** {dim.get('justification', 'N/A')}")
+                    excerpt = dim.get('candidate_response_excerpt')
+                    if excerpt:
+                        st.info(f"**Your Response:** \"{excerpt[:200]}...\"")
         
         st.markdown("### 💪 Key Strengths")
         for strength in final_eval.get('key_strengths', []):
