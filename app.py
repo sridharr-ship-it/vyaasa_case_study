@@ -449,25 +449,24 @@ def render_approach_workspace():
     with col2:
         if st.button("📤 Submit Complete Approach", type="primary", use_container_width=True, key="submit_full_approach"):
             combined = aggregate_approach_content()
-            
+            word_count = len(combined.split())
             # Validate
-            is_valid, error_msg = validate_response(combined, "awaiting_approach_structured")
-            if not is_valid:
-                st.session_state.validation_error = error_msg
+            if word_count < 250:
+                st.session_state.validation_error = f"❌ Need 250+ words, got {word_count}."
                 st.rerun()
             else:
                 st.session_state.validation_error = ""
                 
-                # Process
+                # Process through graph
                 with st.spinner("Processing your approach..."):
-                    updated_state = stream_graph_update(combined)
-                    
-                    # Clear workspace
-                    st.session_state.approach_framework = ""
-                    st.session_state.approach_technical = ""
-                    st.session_state.approach_code = "# Write your code here...\n\n"
-                    st.session_state.approach_implementation = ""
-                    st.rerun()
+                    success = process_graph_stream(combined)
+                    if success:
+                        # Clear workspace
+                        st.session_state.approach_framework = ""
+                        st.session_state.approach_technical = ""
+                        st.session_state.approach_code = "# Write your code here...\n\n"
+                        st.session_state.approach_implementation = ""
+                        st.rerun()
 
 def render_standard_input():
     """Render standard text input"""
@@ -584,7 +583,7 @@ def interview_page():
     """Unified interview page with consistent UI"""
     apply_custom_css()
     render_header()
-    inject_clipboard_blocker()
+    # inject_clipboard_blocker()
     state = st.session_state.interview_state
     current_phase = state.get('current_phase', 'classification')
     
@@ -653,7 +652,6 @@ def interview_page():
         else:
             st.session_state.current_page = "results"
             st.rerun()
-
 def handle_conversation_phase(state, current_phase):
     """Handle understanding and approach phases"""
     messages = state.get('messages', [])
@@ -677,9 +675,6 @@ def handle_conversation_phase(state, current_phase):
                     except Exception as e:
                         st.session_state.ai_processing = False
                         st.error(f"Error: {str(e)}")
-                        if st.session_state.get('debug_mode', False):
-                            import traceback
-                            st.code(traceback.format_exc())
                 return
         
         elif current_phase == 'approach':
@@ -694,9 +689,6 @@ def handle_conversation_phase(state, current_phase):
                     except Exception as e:
                         st.session_state.ai_processing = False
                         st.error(f"Error: {str(e)}")
-                        if st.session_state.get('debug_mode', False):
-                            import traceback
-                            st.code(traceback.format_exc())
                 return
     
     # Process AI response if needed
@@ -711,9 +703,6 @@ def handle_conversation_phase(state, current_phase):
                 except Exception as e:
                     st.session_state.ai_processing = False
                     st.error(f"Error: {str(e)}")
-                    if st.session_state.get('debug_mode', False):
-                        import traceback
-                        st.code(traceback.format_exc())
             return
     
     # Reset AI processing flag
@@ -726,10 +715,11 @@ def handle_conversation_phase(state, current_phase):
         current_activity = state.get('current_activity', '')
         approach_count = state.get('approach_question_count', 0)
         
-        # ✅ FIX: Check for approach phase and show workspace
-        if current_phase == 'approach':
+        # ✅ FIX: Only show workspace for FIRST approach question
+        if current_phase == 'approach' and approach_count == 0:
             render_approach_workspace()
         else:
+            # For all other questions (understanding OR approach follow-ups), show standard input
             render_standard_input()
 
 
