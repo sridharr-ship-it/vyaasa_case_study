@@ -1,3 +1,4 @@
+# app.py - Pure graph.stream() approach for all phases
 
 import streamlit as st
 import time
@@ -5,14 +6,77 @@ from datetime import datetime
 from typing import Dict, List
 from langchain_core.messages import HumanMessage, AIMessage
 from graph.graph_builder import build_interview_graph
-from graph.nodes.interview_nodes import CaseStudyInterviewNodes
-# ==================== REPORT GENERATION FUNCTIONS ====================
 import io
-import zipfile
 import json
-from datetime import datetime
+import streamlit.components.v1 as components
 
-
+def inject_clipboard_blocker():
+    """Inject JavaScript to block copy-paste operations"""
+    components.html(
+        """
+        <script>
+        const disableClipboard = () => {
+            const parent = window.parent.document;
+            
+            // Disable on all textareas and inputs
+            const inputs = parent.querySelectorAll('textarea, input[type="text"]');
+            
+            inputs.forEach(input => {
+                if (!input.hasAttribute('data-clipboard-disabled')) {
+                    // Block copy
+                    input.addEventListener('copy', (e) => {
+                        e.preventDefault();
+                        alert('❌ Copy is disabled during the interview.');
+                    });
+                    
+                    // Block paste
+                    input.addEventListener('paste', (e) => {
+                        e.preventDefault();
+                        alert('❌ Paste is disabled during the interview.');
+                    });
+                    
+                    // Block cut
+                    input.addEventListener('cut', (e) => {
+                        e.preventDefault();
+                        alert('❌ Cut is disabled during the interview.');
+                    });
+                    
+                    // Block keyboard shortcuts
+                    input.addEventListener('keydown', (e) => {
+                        // Ctrl/Cmd + C (Copy)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+                            e.preventDefault();
+                            alert('❌ Copy is disabled.');
+                        }
+                        // Ctrl/Cmd + V (Paste)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                            e.preventDefault();
+                            alert('❌ Paste is disabled.');
+                        }
+                        // Ctrl/Cmd + X (Cut)
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'x') {
+                            e.preventDefault();
+                            alert('❌ Cut is disabled.');
+                        }
+                    });
+                    
+                    // Disable right-click
+                    input.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                    });
+                    
+                    input.setAttribute('data-clipboard-disabled', 'true');
+                }
+            });
+        };
+        
+        // Run on load and periodically (for Streamlit's dynamic content)
+        disableClipboard();
+        setInterval(disableClipboard, 1000);
+        </script>
+        """,
+        height=0,
+    )
 
 try:
     from streamlit_ace import st_ace
@@ -21,15 +85,13 @@ except ImportError:
     EDITOR_AVAILABLE = False
     st.warning("⚠️ Code editor not available. Install with: pip install streamlit-ace")
 
-
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
-    page_title="Case study",
+    page_title="Case Study Interview",
     page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
 
 # ==================== CUSTOM CSS STYLING ====================
 def apply_custom_css():
@@ -83,6 +145,16 @@ def apply_custom_css():
         background-color: #00a3e0;
     }
     
+    /* ADD THIS - Validation error styling */
+    .validation-error {
+        background-color: #ffebee;
+        color: #c62828;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #c62828;
+        margin: 1rem 0;
+    }
+    
     /* VS Code-like tab styling */
     .stTabs [data-baseweb="tab-list"] {
         background-color: #2d2d30;
@@ -120,56 +192,96 @@ def apply_custom_css():
     </style>
     """, unsafe_allow_html=True)
 
-
 def initialize_session_state():
     """Initialize all session state variables"""
     defaults = {
         'initialized': False,
-        'messages': [],
         'candidate_name': '',
         'role': '',
         'skills': [],
-        'interview_state': {},
         'graph': None,
-        'nodes': None,
-        'start_time': None,
+        'config': {"configurable": {"thread_id": "interview_thread_1"}},
+        'interview_state': {},
         'current_page': 'welcome',
         'approach_framework': '',
         'approach_technical': '',
-        'approach_code': 'Write your code here...',
+        'approach_code': '# Write your code here...\n\n',
         'approach_implementation': '',
         'code_language': 'python',
         'debug_mode': False,
-        'ai_processing': False,
-        'waiting_for_user': False,
-        'awaiting_custom_industry': False,  # ADD THIS
-        'temp_q2_answer': ''                 # ADD THIS
+        'validation_error': '',
+        'awaiting_graph_response': False
     }
     
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
 
+# ==================== GRAPH STREAM HELPER ====================
+def process_graph_stream(trigger_message: str = None) -> bool:
+    """
+    Process graph stream and update state.
+    Returns True if graph execution completed successfully.
+    """
+    if not st.session_state.graph:
+        st.error("Graph not initialized")
+        return False
+    
+    graph = st.session_state.graph
+    config = st.session_state.config
+    current_state = st.session_state.interview_state
+    
+    # Add trigger message if provided
+    if trigger_message:
+        if 'messages' not in current_state:
+            current_state['messages'] = []
+        current_state['messages'].append(HumanMessage(content=trigger_message))
+    
+    try:
+        # Stream through graph
+        for event in graph.stream(current_state, config):
+            if st.session_state.debug_mode:
+                st.sidebar.write(f"Event: {list(event.keys())}")
+            
+            for node_name, node_state in event.items():
+                if node_state:
+                    # Update state from graph output
+                    for key, value in node_state.items():
+                        if key == 'messages':
+                            # Append new messages
+                            if 'messages' not in current_state:
+                                current_state['messages'] = []
+                            existing_ids = {id(m) for m in current_state['messages']}
+                            for msg in value:
+                                if id(msg) not in existing_ids:
+                                    current_state['messages'].append(msg)
+                        else:
+                            # Update other state fields
+                            current_state[key] = value
+        
+        # Update session state
+        st.session_state.interview_state = current_state
+        return True
+    
+    except Exception as e:
+        st.error(f"Graph execution error: {str(e)}")
+        if st.session_state.debug_mode:
+            import traceback
+            st.code(traceback.format_exc())
+        return False
+
 # ==================== UTILITY FUNCTIONS ====================
-def format_time_remaining(seconds: int) -> str:
-    """Format remaining time as MM:SS"""
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    return f"{minutes:02d}:{secs:02d}"
-
-
 def calculate_progress(state: Dict) -> float:
     """Calculate overall interview progress percentage"""
-    total_questions = 3 + 3 + 4 
+    total_questions = 3 + 3 + 4
     completed = 0
     if state.get('mcq_completed'):
         completed += 3
     completed += state.get('understanding_question_count', 0)
     completed += state.get('approach_question_count', 0)
-  
     return (completed / total_questions) * 100
 
-
+# ==================== UTILITY FUNCTIONS ====================
 def aggregate_approach_content() -> str:
     """Aggregate all approach workspace content"""
     parts = []
@@ -181,7 +293,7 @@ def aggregate_approach_content() -> str:
         parts.append(f"**TECHNICAL APPROACH:**\n{st.session_state.approach_technical}")
     
     code = st.session_state.approach_code.strip()
-    if code and code != "# Write your code here...\n\n" and code != "# Write your code here...":
+    if code and code not in ["# Write your code here...\n\n", "# Write your code here..."]:
         language = st.session_state.get('code_language', 'python')
         parts.append(f"**CODE/PSEUDOCODE ({language.upper()}):**\n``````")
     
@@ -189,7 +301,6 @@ def aggregate_approach_content() -> str:
         parts.append(f"**IMPLEMENTATION PLAN:**\n{st.session_state.approach_implementation}")
     
     return "\n\n".join(parts) if parts else ""
-
 
 # ==================== UI COMPONENTS ====================
 def render_header():
@@ -199,14 +310,15 @@ def render_header():
     
     st.markdown(f"""
     <div class="interview-header">
-        <h1 style="margin:0; font-size: 2rem;">💼 Technical Case study System</h1>
-        <p style="margin:0.5rem 0 0 0; font-size: 0.9rem;">Candidate: {st.session_state.candidate_name} | Role: {st.session_state.role}</p>
+        <h1 style="margin:0; font-size: 2rem;">💼 Technical Case Study System</h1>
+        <p style="margin:0.5rem 0 0 0; font-size: 0.9rem;">
+            Candidate: {st.session_state.candidate_name} | Role: {st.session_state.role}
+        </p>
         <div style="margin-top: 1rem;">Progress: {progress:.0f}%</div>
     </div>
     """, unsafe_allow_html=True)
     
     st.progress(progress / 100)
-
 
 def render_phase_status():
     """Render current phase status"""
@@ -215,8 +327,9 @@ def render_phase_status():
     
     phase_info = {
         'classification': ('📋', 'Classification Assessment', 'MCQ Questions'),
+        'case_gen': ('🎯', 'Case Generation', 'Creating Personalized Case'),
         'understanding': ('🤔', 'Problem Understanding', 'Clarifying Questions'),
-        'approach': ('🎯', 'Solution Approach', 'Framework Development'),
+        'approach': ('💡', 'Solution Approach', 'Framework Development'),
         'final': ('📊', 'Final Evaluation', 'Comprehensive Feedback')
     }
     
@@ -225,526 +338,472 @@ def render_phase_status():
     col1, col2 = st.columns([1, 2])
     
     with col1:
-        st.markdown(f"<div style='font-size: 3rem; text-align: center;'>{emoji}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size: 3rem; text-align: center;'>{emoji}</div>", 
+                   unsafe_allow_html=True)
     
     with col2:
         st.markdown(f"### {title}")
         st.caption(description)
-    
-   
-
 def render_chat_messages():
-    """Render all conversation messages"""
+    """Render only the last conversation message pair (AI question + Human answer)"""
     state = st.session_state.interview_state
-    messages = state.get('messages', [])
+    current_phase = state.get('current_phase', 'classification')
     
+    # DON'T display messages during MCQ or case generation
+    if current_phase in ['classification', 'case_gen']:
+        return
+    
+    messages = state.get('messages', [])
     if not messages:
         return
     
-    for msg in messages:
+    # Only show the last 2 messages (AI question + Human answer)
+    last_messages = messages[-2:] if len(messages) >= 2 else messages
+    
+    for msg in last_messages:
         if isinstance(msg, AIMessage):
             st.markdown(f"""
             <div class="ai-message">
                 <strong>{msg.content}</strong><br>
             </div>
             """, unsafe_allow_html=True)
-        elif isinstance(msg, HumanMessage):
-            st.markdown(f"""
-            <div class="candidate-message">
-                <strong>👤 </strong><br>{msg.content}
-            </div>
-            """, unsafe_allow_html=True)
+        
 
 def render_approach_workspace():
-    """Render approach workspace - FIRST question gets tabs based on role type"""
+    """Render approach workspace for structured response"""
     state = st.session_state.interview_state
-    count = state.get('approach_question_count', 0)
-    current_activity = state.get('current_activity', '')
-    
-    # Get technical role status
     tech_type = state.get('tech_type', '')
     is_technical = tech_type == "Technical"
     
-    # *** CRITICAL: Only show workspace for FIRST question (count=1) ***
-    if count == 1 and current_activity == 'awaiting_approach_structured':
-        st.markdown("### 📝 Solution Approach Workspace")
-        st.info("📊 **Structure your approach using the tabs below. All content will be combined when you submit.**")
+    st.markdown("### 📝 Solution Approach Workspace")
+    st.info("📊 **Structure your approach using the tabs below. Minimum 250 words required.**")
+    
+    if is_technical:
+        tab1, tab2, tab3 = st.tabs(["📋 Framework", "⚙️ Technical", "💻 Code"])
         
-        # *** CONDITIONAL: Show 3 tabs for technical, 1 tab for non-technical ***
-        if is_technical:
-            # THREE-TAB INTERFACE FOR TECHNICAL ROLES
-            tab1, tab2, tab3 = st.tabs(["📋 Framework", "⚙️ Technical Approach", "💻 Code Editor"])
-            
-            with tab1:
-                st.markdown("**Framework & Methodology**")
-                st.caption("Describe your overall framework, key steps, and structure")
-                st.session_state.approach_framework = st.text_area(
-                    "Framework Structure",
-                    value=st.session_state.get('approach_framework', ''),
-                    height=250,
-                    placeholder="• Outline your framework\n• Key phases/steps\n• Areas of analysis\n• Overall methodology...",
-                    key="approach_framework_input",
-                    label_visibility="collapsed"
-                )
-            
-            with tab2:
-                st.markdown("**Technical Approach**")
-                st.caption("Algorithms, models, techniques - use code tab for implementation")
-                st.session_state.approach_technical = st.text_area(
-                    "Technical Approach",
-                    value=st.session_state.get('approach_technical', ''),
-                    height=250,
-                    placeholder="• Algorithms/models to use\n• Data preprocessing steps\n• Analysis techniques\n• Tools/libraries...",
-                    key="approach_technical_input",
-                    label_visibility="collapsed"
-                )
-            
-            with tab3:
-                st.markdown("**💻 Code/Pseudocode Editor**")
-                st.caption("Write implementation code or pseudocode (optional)")
-                
-                # Language selector
-                col1, col2 = st.columns([3, 1])
-                with col2:
-                    language = st.selectbox(
-                        "Language",
-                        ["python", "javascript", "java", "sql", "r", "c_cpp"],
-                        index=0,
-                        key="code_lang"
-                    )
-                    st.session_state.code_language = language
-                
-                # VS Code-style editor
-                if EDITOR_AVAILABLE:
-                    code_content = st_ace(
-                        value=st.session_state.get('approach_code', '# Write your code here...\n\n'),
-                        language=language,
-                        theme="monokai",
-                        height=400,
-                        font_size=14,
-                        tab_size=4,
-                        show_gutter=True,
-                        keybinding="vscode",
-                        key="ace_editor"
-                    )
-                    if code_content:
-                        st.session_state.approach_code = code_content
-                else:
-                    st.session_state.approach_code = st.text_area(
-                        "Code",
-                        value=st.session_state.get('approach_code', '# Write your code here...\n\n'),
-                        height=400,
-                        key="code_fallback",
-                        label_visibility="collapsed"
-                    )
-        
-        else:
-            # SINGLE TAB FOR NON-TECHNICAL ROLES
-            st.markdown("### 📋 Framework & Methodology")
-            st.caption("Describe your overall framework, approach, and methodology")
+        with tab1:
+            st.markdown("**Framework & Methodology**")
             st.session_state.approach_framework = st.text_area(
-                "Framework & Approach",
-                value=st.session_state.get('approach_framework', ''),
-                height=400,
-                placeholder="• Outline your framework and methodology\n• Key phases and steps\n• Analysis approach\n• Data gathering methods\n• Tools and techniques you would use\n• Implementation plan...",
-                key="approach_framework_nontechnical",
+                "Framework",
+                value=st.session_state.approach_framework,
+                height=250,
+                placeholder="• Overall framework\n• Key phases/steps\n• Methodology...",
+                key="fw_input",
                 label_visibility="collapsed"
             )
-            
-            # Clear technical fields for non-technical roles
-            st.session_state.approach_technical = ""
-            st.session_state.approach_code = ""
         
-        # Submit button (same for both)
-        st.markdown("<br>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("📤 Submit Complete Approach", type="primary", use_container_width=True, key="submit_full_approach"):
-                combined = aggregate_approach_content()
-                
-                if combined.strip():
-                    current_state = st.session_state.interview_state
-                    current_state['messages'].append(HumanMessage(content=combined))
-                    
-                    # Clear workspace
-                    st.session_state.approach_framework = ""
-                    st.session_state.approach_technical = ""
-                    st.session_state.approach_code = "# Write your code here...\n\n"
-                    
-                    st.session_state.interview_state = current_state
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Please provide your approach before submitting.")
-    
+        with tab2:
+            st.markdown("**Technical Approach**")
+            st.session_state.approach_technical = st.text_area(
+                "Technical",
+                value=st.session_state.approach_technical,
+                height=250,
+                placeholder="• Algorithms/models\n• Data preprocessing\n• Tools/libraries...",
+                key="tech_input",
+                label_visibility="collapsed"
+            )
+        
+        with tab3:
+            st.markdown("**💻 Code/Pseudocode**")
+            
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                language = st.selectbox(
+                    "Language",
+                    ["python", "javascript", "sql", "r", "c_cpp"],
+                    key="lang_select"
+                )
+                st.session_state.code_language = language
+            
+            if EDITOR_AVAILABLE:
+                code_content = st_ace(
+                    value=st.session_state.approach_code,
+                    language=language,
+                    theme="monokai",
+                    height=400,
+                    key="ace_editor"
+                )
+                if code_content:
+                    st.session_state.approach_code = code_content
+            else:
+                st.session_state.approach_code = st.text_area(
+                    "Code",
+                    value=st.session_state.approach_code,
+                    height=400,
+                    key="code_fallback",
+                    label_visibility="collapsed"
+                )
     else:
-        # *** Normal text box for questions 2, 3, 4 (count >= 2) ***
-        st.markdown("### 💬 Your Response")
-        user_response = st.text_area(
-            "Your Response",
-            height=180,
-            placeholder="Type your response here...",
-            key=f"approach_text_{count}",
+        st.markdown("### 📋 Framework & Methodology")
+        st.session_state.approach_framework = st.text_area(
+            "Framework",
+            value=st.session_state.approach_framework,
+            height=400,
+            placeholder="• Framework and methodology (min 250 words)...",
+            key="fw_nontechnical",
             label_visibility="collapsed"
         )
-        
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("Submit Response", type="primary", use_container_width=True, key=f"submit_text_{count}"):
-                if user_response.strip():
-                    current_state = st.session_state.interview_state
-                    current_state['messages'].append(HumanMessage(content=user_response))
-                    st.session_state.interview_state = current_state
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Please provide a response.")
+    
+    # Validation error display
+    if st.session_state.validation_error:
+        st.markdown(f"""
+        <div class="validation-error">
+            {st.session_state.validation_error}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Submit button
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("📤 Submit Approach", type="primary", use_container_width=True, key="submit_approach_btn"):
+            combined = aggregate_approach_content()
+            word_count = len(combined.split())
+            
+            if word_count < 250:
+                st.session_state.validation_error = f"⚠️ Need 250+ words, got {word_count}."
+                st.rerun()
+            else:
+                st.session_state.validation_error = ""
+                
+                with st.spinner("Processing your approach..."):
+                    success = process_graph_stream(combined)
+                    if success:
+                        # Clear workspace
+                        st.session_state.approach_framework = ""
+                        st.session_state.approach_technical = ""
+                        st.session_state.approach_code = "# Write your code here...\n\n"
+                        st.session_state.approach_implementation = ""
+                        st.rerun()
+
+def render_standard_input():
+    """Render standard text input"""
+    st.markdown("### 💭 Your Response")
+    st.caption("Please provide at least 10 words")
+    
+    user_input = st.text_area(
+        "Your response",
+        height=150,
+        placeholder="Type your answer here (minimum 10 words)...",
+        key="std_input"
+    )
+    
+    # Validation error display
+    if st.session_state.validation_error:
+        st.markdown(f"""
+        <div class="validation-error">
+            {st.session_state.validation_error}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("📤 Submit", type="primary", use_container_width=True, key="submit_std_btn"):
+            word_count = len(user_input.split())
+            
+            if word_count < 10:
+                st.session_state.validation_error = f"⚠️ Need 10+ words, got {word_count}."
+                st.rerun()
+            else:
+                st.session_state.validation_error = ""
+                
+                with st.spinner("Processing..."):
+                    success = process_graph_stream(user_input)
+                    if success:
+                        st.rerun()
 
 # ==================== PAGE VIEWS ====================
 def welcome_page():
-    """Welcome and candidate information collection"""
+    """Welcome page"""
     apply_custom_css()
     
     st.markdown("""
     <div class="interview-header">
-        <h1 style="margin:0;">💼 Technical Case study System</h1>
-        <p style="margin:0.5rem 0 0 0; opacity: 0.9;">Experience a comprehensive consulting-style technical case study</p>
+        <h1 style="margin:0;">💼 Technical Case Study System</h1>
+        <p style="margin:0.5rem 0 0 0;">Comprehensive consulting-style case interview</p>
     </div>
     """, unsafe_allow_html=True)
-    
     
     with st.form("candidate_info"):
         st.markdown("### Your Information")
         
-        
         name = st.text_input("Full Name *", placeholder="John Doe")
         role = st.text_input("Target Role *", placeholder="Data Scientist")
+        skills_input = st.text_input("Key Skills (comma-separated)", placeholder="Python, ML, SQL")
         
-        
-        skills_input = st.text_input("Key Technical Skills (comma-separated)", 
-                                     placeholder="Python, Machine Learning, SQL")
-        
-        st.markdown("### case study structure")
+        st.markdown("### Interview Structure")
         st.info("""
-        **Phase 1:** Classification (3 MCQs) - Determine case study domain  
-        **Phase 2:** Understanding (3 questions) - Problem clarification  
-        **Phase 3:** Approach (4 questions) - Solution development  
-        **Phase 4:** Follow-up (3 questions) - Deep dive discussion  
-        **Phase 5:** Final Evaluation - Comprehensive feedback  
-        """)
+    - **Phase 1:** Classification (3 MCQs)
+    - **Phase 2:** Understanding (3 questions)
+    - **Phase 3:** Approach (4 questions, first requires 250 words)
+    - **Phase 4:** Final Evaluation
+    
+    ⚠️ **Note:** Copy-paste functionality is disabled during the CASE to ensure authenticity.
+    """)
         
-      
-        submitted = st.form_submit_button("🚀 Start case study", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("🚀 Start Case study", use_container_width=True, type="primary")
         
         if submitted:
             if not name or not role:
-                st.error("Please provide your name, role.")
-    
+                st.error("Please provide your name and role.")
             else:
                 st.session_state.candidate_name = name
                 st.session_state.role = role
                 st.session_state.skills = [s.strip() for s in skills_input.split(',')] if skills_input else []
                 
-                with st.spinner("Initializing case study system..."):
+                with st.spinner("Initializing..."):
+                    # Build graph
                     st.session_state.graph = build_interview_graph()
-                    st.session_state.nodes = CaseStudyInterviewNodes()
                     
+                    # Initialize state
                     st.session_state.interview_state = {
                         'messages': [],
                         'candidate_name': name,
                         'role': role,
                         'skills': st.session_state.skills,
                         'current_phase': 'classification',
+                        'current_activity': 'start',
                         'mcq_current_question': 0,
                         'mcq_questions': [],
                         'classification_answers': [],
                         'mcq_completed': False,
-                        'understanding_complete': False,
-                        'approach_complete': False,
-                       
-                        'interview_complete': False,
+                        'case_study': None,
                         'understanding_question_count': 0,
+                        'understanding_complete': False,
                         'approach_question_count': 0,
-                       
-                        'start_time': time.time()
+                        'approach_complete': False,
+                        'interview_complete': False,
+                        'validation_failed': False
                     }
                     
-                    st.session_state.start_time = time.time()
+                    # Trigger first MCQ generation via graph stream
+                    process_graph_stream()
+                    
                     st.session_state.initialized = True
-                    st.session_state.current_page = "mcq"
+                    st.session_state.current_page = "interview"
                 
-                st.success("✅ System initialized! Starting case study...")
+                st.success("✅ Initialized! Starting interview...")
                 time.sleep(1)
                 st.rerun()
 
-def mcq_phase():
-    """MCQ Classification Phase"""
-    apply_custom_css()
-    render_header()
-    
-    state = st.session_state.interview_state
-    
-    if state.get('mcq_completed'):
-        st.session_state.current_page = "interview"
-        st.rerun()
-        return
-    
-    st.markdown("""
-    <div class="phase-indicator">
-        <h2>📋 Phase 1: Classification Assessment</h2>
-        <p>Answer 3 multiple-choice questions to determine your case study domain.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    mcq_questions = state.get('mcq_questions', [])
-    answers = state.get('classification_answers', [])
-    
-    if len(mcq_questions) < 3:
-        if len(mcq_questions) == len(answers):
-            with st.spinner(f"Generating question {len(mcq_questions) + 1}/3..."):
-                try:
-                    result = st.session_state.nodes.generate_mcq_node(state)
-                    st.session_state.interview_state.update(result)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error generating question: {str(e)}")
-                    if st.session_state.debug_mode:
-                        import traceback
-                        st.code(traceback.format_exc())
-                    return
-    
-    mcq_questions = st.session_state.interview_state.get('mcq_questions', [])
-    
-    if not mcq_questions:
-        st.warning("Generating your first question...")
-        return
-    
-    st.markdown(f"### Progress: {len(answers)}/3 questions answered")
-    st.progress(len(answers) / 3)
-    st.markdown("---")
-    
-    for idx, q in enumerate(mcq_questions):
-        st.markdown(f"### Question {idx + 1}")
-        question_text = q.get('question', 'Question text missing')
-        st.markdown(f"**{question_text}**")
-        
-        options = q.get('options', [])
-        
-        if idx < len(answers):
-            st.success(f"✅ Your answer: {answers[idx]}")
-        else:
-            if idx == len(answers):
-                # Display answer buttons
-                for opt_idx, option in enumerate(options):
-                    if isinstance(option, dict):
-                        option_text = option.get('text', str(option))
-                        option_letter = option.get('letter', chr(65 + opt_idx))
-                    else:
-                        option_text = str(option)
-                        option_letter = chr(65 + opt_idx)
-                    
-                    option_key = f"mcq_q{idx}_opt{opt_idx}_v6"
-                    
-                    if st.button(
-                        f"{option_letter}) {option_text}",
-                        key=option_key,
-                        use_container_width=True
-                    ):
-                        new_answers = st.session_state.interview_state.get('classification_answers', []).copy()
-                        
-                        # Check if Question 2 (idx=1) and Option D (opt_idx=3) - "Other"
-                        if idx == 1 and opt_idx == 3:
-                            st.session_state['awaiting_custom_industry'] = True
-                            st.session_state['temp_q2_answer'] = option_text
-                            st.rerun()
-                        else:
-                            new_answers.append(option_text)
-                            st.session_state.interview_state['classification_answers'] = new_answers
-                            st.rerun()
-                
-                # Show custom industry input if "Other" was selected in Q2
-                if idx == 1 and st.session_state.get('awaiting_custom_industry', False):
-                    st.markdown("---")
-                    st.info("📝 Please specify your preferred industry:")
-                    
-                    # Create unique keys based on current answer count
-                    answers_count = len(st.session_state.interview_state.get('classification_answers', []))
-                    custom_industry_key = f"custom_industry_input_{answers_count}"
-                    confirm_btn_key = f"confirm_industry_btn_{answers_count}"
-                    
-                    custom_industry = st.text_input(
-                        label="Your Industry Preference",
-                        placeholder="e.g., Manufacturing, Retail, Healthcare",
-                        key=custom_industry_key
-                    )
-                    
-                    col1, col2, col3 = st.columns([1, 2, 1])
-                    with col2:
-                        if st.button("✅ Confirm", use_container_width=True, type="primary", key=confirm_btn_key):
-                            if custom_industry.strip():
-                                new_answers = st.session_state.interview_state.get('classification_answers', []).copy()
-                                new_answers.append(custom_industry.strip())
-                                st.session_state.interview_state['classification_answers'] = new_answers
-                                st.session_state['awaiting_custom_industry'] = False
-                                st.session_state.pop('temp_q2_answer', None)
-                                st.rerun()
-                            else:
-                                st.warning("⚠️ Please enter an industry name.")
-            else:
-                st.info("👆 Please answer the previous question first")
-        
-        st.markdown("---")
-    
-    if len(answers) >= 3:
-        st.success("✅ All 3 questions answered! Classification complete!")
-        
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("➡️ Continue to Understanding Phase", type="primary", use_container_width=True, key="continue_btn"):
-                with st.spinner("Analyzing your responses..."):
-                    try:
-                        result = st.session_state.nodes.process_mcq_answers_node(st.session_state.interview_state)
-                        st.session_state.interview_state.update(result)
-                        st.session_state.interview_state['mcq_completed'] = True
-                        st.session_state.interview_state['current_phase'] = 'understanding'
-                        
-                        st.session_state.interview_state['mcq_questions'] = []
-                        st.session_state.interview_state['classification_answers'] = []
-                        
-                        st.session_state.current_page = "interview"
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error processing answers: {str(e)}")
-                        if st.session_state.debug_mode:
-                            import traceback
-                            st.code(traceback.format_exc())
 
-def interview_phase():
-    """Main interview phase"""
+def interview_page():
+    """Unified interview page with consistent UI"""
     apply_custom_css()
     render_header()
-    
+    inject_clipboard_blocker()
     state = st.session_state.interview_state
-    current_phase = state.get('current_phase', 'understanding')
+    current_phase = state.get('current_phase', 'classification')
     
-    # Ensure we're not in MCQ phase
-    if current_phase == 'classification' or not state.get('mcq_completed'):
-        st.session_state.current_page = "mcq"
+    # Check if interview complete
+    if state.get('interview_complete'):
+        st.session_state.current_page = "results"
         st.rerun()
         return
     
+    # Handle MCQ phase separately
+    if current_phase == 'classification' or not state.get('mcq_completed'):
+        mcq_phase(state, None)
+        return
+    
+    # Show phase status for all other phases
     render_phase_status()
     st.markdown("---")
     
-    # Generate case study if needed
-    if not state.get('case_study'):
-        if not st.session_state.ai_processing:
-            st.session_state.ai_processing = True
-            with st.spinner("Generating your personalized case study..."):
-                try:
-                    nodes = st.session_state.nodes
-                    result = nodes.generate_case_node(state)
-                    st.session_state.interview_state.update(result)
-                    st.session_state.ai_processing = False
-                    st.rerun()
-                except Exception as e:
-                    st.session_state.ai_processing = False
-                    st.error(f"Error generating case: {str(e)}")
-                 
-                    return
-        return
+    # Handle case generation
+    if current_phase == 'case_gen':
+        if not state.get('case_study'):
+            if not st.session_state.get('ai_processing', False):
+                st.session_state.ai_processing = True
+                with st.spinner("🎯 Generating your personalized case study..."):
+                    try:
+                        process_graph_stream()
+                        st.session_state.ai_processing = False
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state.ai_processing = False
+                        st.error(f"Error generating case: {str(e)}")
+                        if st.session_state.get('debug_mode', False):
+                            import traceback
+                            st.code(traceback.format_exc())
+                return
+        else:
+            st.session_state.interview_state['current_phase'] = 'understanding'
+            st.rerun()
+            return
     
-    # Display messages
-    render_chat_messages()
+    # Display chat messages for conversation phases
+    if current_phase in ['understanding', 'approach', 'final']:
+        render_chat_messages()
+        st.markdown("---")
     
+    # Handle conversation phases
+    if current_phase in ['understanding', 'approach']:
+        handle_conversation_phase(state, current_phase)
+    
+    elif current_phase == 'final':
+        if not state.get('final_evaluation'):
+            if not st.session_state.get('ai_processing', False):
+                st.session_state.ai_processing = True
+                with st.spinner("📊 Generating comprehensive evaluation..."):
+                    try:
+                        process_graph_stream()
+                        st.session_state.ai_processing = False
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state.ai_processing = False
+                        st.error(f"Error generating evaluation: {str(e)}")
+                        if st.session_state.get('debug_mode', False):
+                            import traceback
+                            st.code(traceback.format_exc())
+                return
+        else:
+            st.session_state.current_page = "results"
+            st.rerun()
+
+
+def handle_conversation_phase(state, current_phase):
+    """Handle understanding and approach phases"""
     messages = state.get('messages', [])
     phase_complete = state.get(f'{current_phase}_complete', False)
     
-    # Determine if we need AI response
+    # Determine message state
     last_message_is_human = len(messages) > 0 and isinstance(messages[-1], HumanMessage)
     last_message_is_ai = len(messages) > 0 and isinstance(messages[-1], AIMessage)
     needs_ai_response = len(messages) == 0 or last_message_is_human
     
-    # Process AI response if needed
-    if needs_ai_response and not phase_complete and not st.session_state.ai_processing:
-        st.session_state.ai_processing = True
-        
-        with st.spinner("Vyaasa is thinking..."):
-            try:
-                nodes = st.session_state.nodes
-                
-                if current_phase == 'understanding':
-                    result = nodes.understanding_node(state)
-                    st.session_state.interview_state.update(result)
-                    
-                    if st.session_state.interview_state.get('understanding_complete'):
-                        eval_result = nodes.understanding_evaluation_node(st.session_state.interview_state)
-                        st.session_state.interview_state.update(eval_result)
+    # Handle phase completion
+    if phase_complete:
+        if current_phase == 'understanding':
+            if not st.session_state.get('ai_processing', False):
+                st.session_state.ai_processing = True
+                with st.spinner("Evaluating understanding phase..."):
+                    try:
+                        process_graph_stream()
+                        st.session_state.ai_processing = False
                         st.session_state.interview_state['current_phase'] = 'approach'
-                        
-                elif current_phase == 'approach':
-                    result = nodes.approach_node(state)
-                    st.session_state.interview_state.update(result)
-                    
-                    if st.session_state.interview_state.get('approach_complete'):
-                        eval_result = nodes.approach_evaluation_node(st.session_state.interview_state)
-                        st.session_state.interview_state.update(eval_result)
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state.ai_processing = False
+                        st.error(f"Error: {str(e)}")
+                        if st.session_state.get('debug_mode', False):
+                            import traceback
+                            st.code(traceback.format_exc())
+                return
+        
+        elif current_phase == 'approach':
+            if not st.session_state.get('ai_processing', False):
+                st.session_state.ai_processing = True
+                with st.spinner("Evaluating approach phase..."):
+                    try:
+                        process_graph_stream()
+                        st.session_state.ai_processing = False
                         st.session_state.interview_state['current_phase'] = 'final'
-                        
-                
-                elif current_phase == 'final':
-                    result = nodes.final_evaluation_node(state)
-                    st.session_state.interview_state.update(result)
-                    st.session_state.interview_state['interview_complete'] = True
-                    st.session_state.current_page = "results"
-                
-                st.session_state.ai_processing = False
-                st.rerun()
-                
-            except Exception as e:
-                st.session_state.ai_processing = False
-                st.error(f"Error: {str(e)}")
-                
-        return
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state.ai_processing = False
+                        st.error(f"Error: {str(e)}")
+                        if st.session_state.get('debug_mode', False):
+                            import traceback
+                            st.code(traceback.format_exc())
+                return
+    
+    # Process AI response if needed
+    if needs_ai_response and not phase_complete:
+        if not st.session_state.get('ai_processing', False):
+            st.session_state.ai_processing = True
+            with st.spinner("Vyaasa is thinking..."):
+                try:
+                    process_graph_stream()
+                    st.session_state.ai_processing = False
+                    st.rerun()
+                except Exception as e:
+                    st.session_state.ai_processing = False
+                    st.error(f"Error: {str(e)}")
+                    if st.session_state.get('debug_mode', False):
+                        import traceback
+                        st.code(traceback.format_exc())
+            return
     
     # Reset AI processing flag
     st.session_state.ai_processing = False
-    
-    st.markdown("---")
     
     # Show input if waiting for user
     show_input = not phase_complete and (last_message_is_ai or len(messages) == 0)
     
     if show_input:
-        if current_phase == 'approach' and state.get('approach_question_count', 0) == 1:
-            # Special workspace for first approach question
+        current_activity = state.get('current_activity', '')
+        
+        # Check for structured approach workspace
+        if current_phase == 'approach' and current_activity == 'awaiting_approach_structured':
             render_approach_workspace()
         else:
-            # Normal text input for all other questions
-            st.markdown("### 💭 Your Response")
-            
-            with st.form("response_form", clear_on_submit=True):
-                user_input = st.text_area(
-                    "Type your answer here",
-                    height=150,
-                    placeholder="Share your thoughts, ask questions, or provide your analysis...",
-                    label_visibility="collapsed",
-                    key="user_response_input"
-                )
+            # Standard text input
+            render_standard_input()
+
+
+def render_standard_input():
+    """Render standard text input with validation"""
+    st.markdown("### 💭 Your Response")
+    
+    # Initialize validation error in session state if not exists
+    if 'validation_error' not in st.session_state:
+        st.session_state.validation_error = ""
+    
+    with st.form("response_form", clear_on_submit=True):
+        user_input = st.text_area(
+            "Type your answer here",
+            height=150,
+            placeholder="Share your thoughts, ask questions, or provide your analysis...",
+            label_visibility="collapsed",
+            key="user_response_input"
+        )
+        
+        # Show validation error if exists
+        if st.session_state.validation_error:
+            st.error(st.session_state.validation_error)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            submitted = st.form_submit_button(
+                "📤 Submit Response", 
+                use_container_width=True, 
+                type="primary"
+            )
+        
+        if submitted:
+            if user_input.strip():
+                # Validate word count
+                word_count = len(user_input.strip().split())
                 
-                col1, col2, col3 = st.columns([1, 2, 1])
-                with col2:
-                    submitted = st.form_submit_button(
-                        "📤 Submit Response", 
-                        use_container_width=True, 
-                        type="primary"
-                    )
-                
-                if submitted and user_input.strip():
-                    new_messages = st.session_state.interview_state.get('messages', [])
-                    new_messages.append(HumanMessage(content=user_input.strip()))
-                    st.session_state.interview_state['messages'] = new_messages
+                if word_count < 10:
+                    st.session_state.validation_error = f"⚠️ Please provide at least 10 words. You entered {word_count} word(s)."
                     st.rerun()
-                elif submitted:
-                    st.warning("⚠️ Please enter a response before submitting.")
+                else:
+                    # Clear validation error
+                    st.session_state.validation_error = ""
+                    
+                    # Add message and process
+                    new_messages = st.session_state.interview_state.get('messages', [])
+                    st.session_state.interview_state['messages'] = new_messages
+                    
+                    # Process response
+                    if not st.session_state.get('ai_processing', False):
+                        st.session_state.ai_processing = True
+                        with st.spinner("Processing your response..."):
+                            try:
+                                process_graph_stream(user_input.strip())
+                                st.session_state.ai_processing = False
+                                st.rerun()
+                            except Exception as e:
+                                st.session_state.ai_processing = False
+                                st.error(f"Error: {str(e)}")
+                                if st.session_state.get('debug_mode', False):
+                                    import traceback
+                                    st.code(traceback.format_exc())
+            else:
+                st.session_state.validation_error = "⚠️ Please enter a response before submitting."
+                st.rerun()
+
 
 def generate_chat_transcript() -> str:
     """Generate a formatted chat transcript of the entire interview"""
@@ -763,8 +822,7 @@ def generate_chat_transcript() -> str:
     skills_str = ', '.join(st.session_state.skills) if st.session_state.skills else 'Not specified'
     transcript.append(f'Skills: {skills_str}')
     transcript.append(f'Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    duration = format_time_remaining(int(time.time() - st.session_state.start_time))
-    transcript.append(f'Duration: {duration}')
+
     transcript.append('')
     transcript.append('=' * 80)
     
@@ -793,7 +851,7 @@ def generate_chat_transcript() -> str:
     for msg in messages:
         if isinstance(msg, AIMessage):
             timestamp = datetime.now().strftime('%H:%M:%S')
-            transcript.append(f'[{timestamp}] CASE STUDY (Vyaasa):')
+            transcript.append(f'[{timestamp}] VYAASA:')
             transcript.append('-' * 80)
             transcript.append(msg.content)
             transcript.append('')
@@ -812,6 +870,7 @@ def generate_chat_transcript() -> str:
     
     return '\n'.join(transcript)
 
+
 def generate_evaluation_report() -> str:
     """Generate a comprehensive evaluation report"""
     state = st.session_state.interview_state
@@ -827,7 +886,7 @@ def generate_evaluation_report() -> str:
     report.append("\nCandidate: " + st.session_state.candidate_name)
     report.append("Target Role: " + st.session_state.role)
     report.append("Date: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-    report.append("Interview Duration: " + format_time_remaining(int(time.time() - st.session_state.start_time)))
+
 
     # Case Context
     report.append("\n" + "=" * 80)
@@ -885,7 +944,6 @@ def generate_evaluation_report() -> str:
         report.append("=" * 80)
         report.append(f"\nUnderstanding Phase: {phase_breakdown.get('understanding', 'N/A')}")
         report.append(f"Approach Phase: {phase_breakdown.get('approach', 'N/A')}")
-        report.append(f"Follow-up Phase: {phase_breakdown.get('followup', 'N/A')}")
         
     # Recommendations
     recommendations = final_eval.get('recommended_next_steps', [])
@@ -905,6 +963,10 @@ def generate_evaluation_report() -> str:
 
 def create_interview_report_zip() -> bytes:
     """Create a ZIP file containing chat transcript and evaluation report"""
+    import io
+    import zipfile
+    import json
+    
     # Create BytesIO object to store ZIP in memory
     zip_buffer = io.BytesIO()
     
@@ -947,6 +1009,44 @@ def create_interview_report_zip() -> bytes:
     
     return zip_buffer.getvalue()
 
+
+
+
+
+def render_sidebar():
+    """Render sidebar with navigation and progress tracking"""
+    with st.sidebar:
+        st.markdown("## 🎯 Interview Control Panel")
+        
+        if st.session_state.get('initialized', False):
+            st.markdown(f"**Candidate:** {st.session_state.candidate_name}")
+            st.markdown(f"**Role:** {st.session_state.role}")
+            st.markdown("---")
+            
+            st.markdown("### Interview Progress")
+            state = st.session_state.interview_state
+            
+            phases = {
+                'Classification': state.get('mcq_completed', False),
+                'Understanding': state.get('understanding_complete', False),
+                'Approach': state.get('approach_complete', False),
+                'Final': state.get('interview_complete', False)
+            }
+            
+            for phase, completed in phases.items():
+                status = "✅" if completed else "⏳"
+                st.markdown(f"{status} {phase}")
+            
+            st.markdown("---")
+            
+
+            
+            st.markdown("---")
+            
+            if st.button("🔄 Restart Interview", use_container_width=True):
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.rerun()
 def results_page():
     """Display final interview results"""
     apply_custom_css()
@@ -960,6 +1060,15 @@ def results_page():
     
     state = st.session_state.interview_state
     final_eval = state.get('final_evaluation', {})
+    
+    # Add validation check
+    if not isinstance(final_eval, dict):
+        st.error("Error: Evaluation data is not properly formatted. Please restart the interview.")
+        if st.button("🔄 Start New Interview", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+        return
     
     st.markdown("## 📊 Your Performance Report")
     
@@ -984,27 +1093,45 @@ def results_page():
         if dimension_scores:
             st.markdown("### 📊 Dimension Scores")
             for dim in dimension_scores:
-                with st.expander(f"{dim.get('dimension', 'N/A')} - {dim.get('score', 0)}/10 (Weight: {dim.get('weight', 0)}%)"):
+                dim_name = dim.get('dimension', 'N/A')
+                dim_score = dim.get('score', 0)
+                dim_weight = dim.get('weight', 0)
+                
+                with st.expander(f"{dim_name} - {dim_score}/10 (Weight: {dim_weight}%)"):
                     st.write(f"**Justification:** {dim.get('justification', 'N/A')}")
-                    excerpt = dim.get('candidate_response_excerpt')
+                    excerpt = dim.get('candidate_response_excerpt', '')
                     if excerpt:
-                        st.info(f"**Your Response:** \"{excerpt[:200]}...\"")
+                        # Truncate long excerpts
+                        display_excerpt = excerpt[:200] + "..." if len(excerpt) > 200 else excerpt
+                        st.info(f"**Your Response:** \"{display_excerpt}\"")
         
         st.markdown("### 💪 Key Strengths")
-        for strength in final_eval.get('key_strengths', []):
-            st.success(f"✓ {strength}")
+        strengths = final_eval.get('key_strengths', [])
+        if strengths:
+            for strength in strengths:
+                st.success(f"✓ {strength}")
+        else:
+            st.info("No specific strengths recorded.")
         
         st.markdown("### 🎯 Development Areas")
-        for area in final_eval.get('development_areas', []):
-            st.info(f"→ {area}")
+        dev_areas = final_eval.get('development_areas', [])
+        if dev_areas:
+            for area in dev_areas:
+                st.info(f"→ {area}")
+        else:
+            st.info("No specific development areas recorded.")
         
         st.markdown("### 🚀 Recommended Next Steps")
-        for rec in final_eval.get('recommended_next_steps', []):
-            st.warning(f"💡 {rec}")
+        next_steps = final_eval.get('recommended_next_steps', [])
+        if next_steps:
+            for rec in next_steps:
+                st.warning(f"💡 {rec}")
+        else:
+            st.info("No specific recommendations recorded.")
     
     st.markdown("---")
     
-    # Updated download and restart buttons
+    # Download and restart buttons
     col1, col2 = st.columns(2)
     
     with col1:
@@ -1013,7 +1140,8 @@ def results_page():
             zip_data = create_interview_report_zip()
             
             # Generate filename with timestamp
-            filename = f"Interview_Report_{st.session_state.candidate_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            candidate_name = st.session_state.get('candidate_name', 'Candidate')
+            filename = f"Interview_Report_{candidate_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
             
             # Download button
             st.download_button(
@@ -1027,7 +1155,9 @@ def results_page():
             
         except Exception as e:
             st.error(f"Error generating report: {str(e)}")
-            
+            if st.session_state.get('debug_mode', False):
+                import traceback
+                st.code(traceback.format_exc())
     
     with col2:
         if st.button("🔄 Start New Interview", use_container_width=True):
@@ -1036,56 +1166,184 @@ def results_page():
             st.rerun()
 
 
-# ==================== SIDEBAR ====================
-def render_sidebar():
-    """Render sidebar with navigation and debug options"""
-    with st.sidebar:
-        st.markdown("## 🎯 Case study Control Panel")
-        
-        if st.session_state.initialized:
-            st.markdown(f"**Candidate:** {st.session_state.candidate_name}")
-            st.markdown(f"**Role:** {st.session_state.role}")
-            st.markdown("---")
-            
-            st.markdown("### Case study Progress")
-            state = st.session_state.interview_state
-            
-            phases = {
-                'Classification': state.get('mcq_completed', False),
-                'Understanding': state.get('understanding_complete', False),
-                'Approach': state.get('approach_complete', False),
-                'Final': state.get('interview_complete', False)
-            }
-            
-            for phase, completed in phases.items():
-                status = "✅" if completed else "⏳"
-                st.markdown(f"{status} {phase}")
-            
-            st.markdown("---")
-            
-            
-            
-            if st.button("🔄 Restart Case study", use_container_width=True):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
-
-
-# ==================== MAIN APPLICATION ====================
 def main():
     """Main application entry point"""
     initialize_session_state()
     render_sidebar()
     
-    if not st.session_state.initialized:
+    if not st.session_state.get('initialized', False):
         welcome_page()
-    elif st.session_state.current_page == "mcq":
-        mcq_phase()
-    elif st.session_state.current_page == "interview":
-        interview_phase()
-    elif st.session_state.current_page == "results":
-        results_page()
+    else:
+        # Use unified interview_page instead of separate pages
+        current_page = st.session_state.get('current_page', 'interview')
+        
+        if current_page == "results":
+            results_page()
+        else:
+            interview_page()
 
 
+def mcq_phase(state, messages):
+    """Handle MCQ classification phase"""
+    
+    mcq_completed = state.get('mcq_completed', False)
+    
+    if mcq_completed:
+        st.session_state.interview_state['current_phase'] = 'case_gen'
+        st.rerun()
+        return
+    
+    # Phase indicator header
+    st.markdown("""
+    <div class="phase-indicator">
+        <h2>📋 Phase 1: Classification Assessment</h2>
+        <p>Answer 3 multiple-choice questions to determine your case study domain.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    mcq_questions = state.get('mcq_questions', [])
+    answers = state.get('classification_answers', [])
+    
+    # Generate new question if needed
+    if len(mcq_questions) < 3:
+        if len(mcq_questions) == len(answers):
+            with st.spinner(f"Generating question {len(mcq_questions) + 1}/3..."):
+                try:
+                    process_graph_stream()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error generating question: {str(e)}")
+                    if st.session_state.get('debug_mode', False):
+                        import traceback
+                        st.code(traceback.format_exc())
+                    return
+    
+    mcq_questions = st.session_state.interview_state.get('mcq_questions', [])
+    
+    if not mcq_questions:
+        st.warning("Generating your first question...")
+        return
+    
+    # Progress indicator
+    st.markdown(f"### Progress: {len(answers)}/3 questions answered")
+    st.progress(len(answers) / 3)
+    st.markdown("---")
+    
+    # Display all questions with their status
+    for idx, q in enumerate(mcq_questions):
+        st.markdown(f"### Question {idx + 1}")
+        question_text = q.get('question', 'Question text missing')
+        st.markdown(f"**{question_text}**")
+        
+        options = q.get('options', [])
+        
+        if idx < len(answers):
+            # Show answered questions
+            st.success(f"✅ Your answer: {answers[idx]}")
+        else:
+            if idx == len(answers):
+                # Current question - show answer buttons
+                for opt_idx, option in enumerate(options):
+                    if isinstance(option, dict):
+                        option_text = option.get('text', str(option))
+                        option_letter = option.get('letter', chr(65 + opt_idx))
+                    else:
+                        option_text = str(option)
+                        option_letter = chr(65 + opt_idx)
+                    
+                    option_key = f"mcq_q{idx}_opt{opt_idx}_v11"
+                    
+                    if st.button(
+                        f"{option_letter}) {option_text}",
+                        key=option_key,
+                        use_container_width=True
+                    ):
+                        new_answers = st.session_state.interview_state.get('classification_answers', []).copy()
+                        
+                        # Check if Question 2 (idx=1) and Option D (opt_idx=3) - "Other"
+                        if idx == 1 and opt_idx == 3:
+                            st.session_state['awaiting_custom_industry'] = True
+                            st.session_state['temp_q2_answer'] = option_text
+                            st.rerun()
+                        else:
+                            new_answers.append(option_text)
+                            st.session_state.interview_state['classification_answers'] = new_answers
+                            
+                            with st.spinner("Processing your answer..."):
+                                try:
+                                    process_graph_stream(option_text)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error: {str(e)}")
+                                    if st.session_state.get('debug_mode', False):
+                                        import traceback
+                                        st.code(traceback.format_exc())
+                
+                # Show custom industry input if "Other" was selected in Q2
+                if idx == 1 and st.session_state.get('awaiting_custom_industry', False):
+                    st.markdown("---")
+                    st.info("📝 Please specify your preferred industry:")
+                    
+                    # Create unique keys based on current answer count
+                    answers_count = len(st.session_state.interview_state.get('classification_answers', []))
+                    custom_industry_key = f"custom_industry_input_{answers_count}_v5"
+                    confirm_btn_key = f"confirm_industry_btn_{answers_count}_v5"
+                    
+                    custom_industry = st.text_input(
+                        label="Your Industry Preference",
+                        placeholder="e.g., Manufacturing, Retail, Healthcare",
+                        key=custom_industry_key
+                    )
+                    
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col2:
+                        if st.button("✅ Confirm", use_container_width=True, type="primary", key=confirm_btn_key):
+                            if custom_industry.strip():
+                                new_answers = st.session_state.interview_state.get('classification_answers', []).copy()
+                                new_answers.append(custom_industry.strip())
+                                st.session_state.interview_state['classification_answers'] = new_answers
+                                st.session_state['awaiting_custom_industry'] = False
+                                st.session_state.pop('temp_q2_answer', None)
+                                
+                                with st.spinner("Processing your answer..."):
+                                    try:
+                                        process_graph_stream(custom_industry.strip())
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error: {str(e)}")
+                                        if st.session_state.get('debug_mode', False):
+                                            import traceback
+                                            st.code(traceback.format_exc())
+                            else:
+                                st.warning("⚠️ Please enter an industry name.")
+            else:
+                # Future questions - locked until previous answered
+                st.info("👆 Please answer the previous question first")
+        
+        st.markdown("---")
+    
+    # Complete classification when all 3 questions answered
+    if len(answers) >= 3:
+        st.success("✅ All 3 questions answered! Classification complete!")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("➡️ Continue to Understanding Phase", type="primary", use_container_width=True, key="continue_btn_v3"):
+                with st.spinner("Analyzing your responses..."):
+                    try:
+                        process_graph_stream()
+                        st.session_state.interview_state['mcq_completed'] = True
+                        st.session_state.interview_state['current_phase'] = 'case_gen'
+                        
+                        # Clean up MCQ data
+                        st.session_state.interview_state['mcq_questions'] = []
+                        st.session_state.interview_state['classification_answers'] = []
+                        
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error processing answers: {str(e)}")
+                        if st.session_state.get('debug_mode', False):
+                            import traceback
+                            st.code(traceback.format_exc())
 if __name__ == "__main__":
     main()
