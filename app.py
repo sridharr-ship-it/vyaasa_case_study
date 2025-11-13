@@ -339,27 +339,38 @@ def render_chat_messages():
             </div>
             """, unsafe_allow_html=True)
         
-
 def render_approach_workspace():
-    """Render approach workspace for structured response"""
+    """Render approach workspace with tabs based on technical type"""
     state = st.session_state.interview_state
-    tech_type = state.get('tech_type', '')
-    is_technical = tech_type == "Technical"
     
-    st.markdown("### 📝 Solution Approach Workspace")
-    st.info("📊 **Structure your approach using the tabs below. Minimum 250 words required.**")
+    # Get technical type
+    tech_type = state.get("tech_type", "")
+    domain = state.get("domain", "")
+    role = state.get("role", "")
+    
+    # Technical detection with fallback
+    technical_keywords = ["data science", "machine learning", "ml", "ai", "software", "data analyst", "data scientist", "engineer"]
+    is_technical = (
+        tech_type == "Technical" or
+        any(keyword in domain.lower() for keyword in technical_keywords) or
+        any(keyword in role.lower() for keyword in technical_keywords)
+    )
+    
+    st.markdown("### 📋 Solution Approach Workspace")
+    st.info("Structure your approach using the tabs below. **Minimum 250 words required.**")
     
     if is_technical:
+        # ✅ TECHNICAL CASE: Framework, Technical, Code tabs
         tab1, tab2, tab3 = st.tabs(["📋 Framework", "⚙️ Technical", "💻 Code"])
         
         with tab1:
             st.markdown("**Framework & Methodology**")
             st.session_state.approach_framework = st.text_area(
                 "Framework",
-                value=st.session_state.approach_framework,
-                height=250,
-                placeholder="• Overall framework\n• Key phases/steps\n• Methodology...",
-                key="fw_input",
+                value=st.session_state.get("approach_framework", ""),
+                height=300,
+                placeholder="• Overall framework and approach\n• Key phases/steps\n• Methodology specific to this case...",
+                key="fw_input_tech",
                 label_visibility="collapsed"
             )
         
@@ -367,84 +378,96 @@ def render_approach_workspace():
             st.markdown("**Technical Approach**")
             st.session_state.approach_technical = st.text_area(
                 "Technical",
-                value=st.session_state.approach_technical,
-                height=250,
-                placeholder="• Algorithms/models\n• Data preprocessing\n• Tools/libraries...",
+                value=st.session_state.get("approach_technical", ""),
+                height=300,
+                placeholder="• Algorithms/models for this case\n• Data preprocessing strategy\n• Tools/libraries\n• Architecture decisions...",
                 key="tech_input",
                 label_visibility="collapsed"
             )
         
         with tab3:
-            st.markdown("**💻 Code/Pseudocode**")
+            st.markdown("**Code/Pseudocode**")
             
+            # Language selector
             col1, col2 = st.columns([3, 1])
             with col2:
                 language = st.selectbox(
                     "Language",
-                    ["python", "javascript", "sql", "r", "c_cpp"],
+                    ["python", "javascript", "sql", "r", "c_cpp", "pseudocode"],
+                    index=0,
                     key="lang_select"
                 )
                 st.session_state.code_language = language
             
-            if EDITOR_AVAILABLE:
-                code_content = st_ace(
-                    value=st.session_state.approach_code,
-                    language=language,
-                    theme="monokai",
-                    height=400,
-                    key="ace_editor"
-                )
-                if code_content:
-                    st.session_state.approach_code = code_content
-            else:
-                st.session_state.approach_code = st.text_area(
-                    "Code",
-                    value=st.session_state.approach_code,
-                    height=400,
-                    key="code_fallback",
-                    label_visibility="collapsed"
-                )
+            # Code input
+            st.session_state.approach_code = st.text_area(
+                "Code",
+                value=st.session_state.get("approach_code", "# Write your code here...\n\n"),
+                height=400,
+                placeholder=f"# Write your {language} code or pseudocode here\n# Example:\n# def analyze_data(df):\n#     # Your implementation\n#     pass",
+                key="code_input",
+                label_visibility="collapsed"
+            )
+    
     else:
-        st.markdown("### 📋 Framework & Methodology")
-        st.session_state.approach_framework = st.text_area(
-            "Framework",
-            value=st.session_state.approach_framework,
-            height=400,
-            placeholder="• Framework and methodology (min 250 words)...",
-            key="fw_nontechnical",
-            label_visibility="collapsed"
-        )
+        # ❌ NON-TECHNICAL CASE: Framework and Implementation tabs
+        tab1, tab2 = st.tabs(["📋 Framework", "📝 Implementation"])
+        
+        with tab1:
+            st.markdown("**Framework & Methodology**")
+            st.session_state.approach_framework = st.text_area(
+                "Framework",
+                value=st.session_state.get("approach_framework", ""),
+                height=400,
+                placeholder="• Overall framework and approach\n• Key phases/steps\n• Analysis methodology\n• Prioritization logic...",
+                key="fw_non_tech",
+                label_visibility="collapsed"
+            )
+        
+        with tab2:
+            st.markdown("**Implementation Plan**")
+            st.session_state.approach_implementation = st.text_area(
+                "Implementation",
+                value=st.session_state.get("approach_implementation", ""),
+                height=400,
+                placeholder="• Step-by-step execution plan\n• Timeline and milestones\n• Resource requirements\n• Risk mitigation strategies...",
+                key="impl_input",
+                label_visibility="collapsed"
+            )
     
     # Validation error display
-    if st.session_state.validation_error:
-        st.markdown(f"""
-        <div class="validation-error">
-            {st.session_state.validation_error}
-        </div>
-        """, unsafe_allow_html=True)
+    if st.session_state.get("validation_error"):
+        st.markdown(
+            f'<div class="validation-error">⚠️ {st.session_state.validation_error}</div>',
+            unsafe_allow_html=True
+        )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
     
     # Submit button
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("📤 Submit Approach", type="primary", use_container_width=True, key="submit_approach_btn"):
+        if st.button("📤 Submit Complete Approach", type="primary", use_container_width=True, key="submit_full_approach"):
             combined = aggregate_approach_content()
-            word_count = len(combined.split())
             
-            if word_count < 250:
-                st.session_state.validation_error = f"⚠️ Need 250+ words, got {word_count}."
+            # Validate
+            is_valid, error_msg = validate_response(combined, "awaiting_approach_structured")
+            if not is_valid:
+                st.session_state.validation_error = error_msg
                 st.rerun()
             else:
                 st.session_state.validation_error = ""
                 
+                # Process
                 with st.spinner("Processing your approach..."):
-                    success = process_graph_stream(combined)
-                    if success:
-                        # Clear workspace
-                        st.session_state.approach_framework = ""
-                        st.session_state.approach_technical = ""
-                        st.session_state.approach_code = "# Write your code here...\n\n"
-                        st.session_state.approach_implementation = ""
-                        st.rerun()
+                    updated_state = stream_graph_update(combined)
+                    
+                    # Clear workspace
+                    st.session_state.approach_framework = ""
+                    st.session_state.approach_technical = ""
+                    st.session_state.approach_code = "# Write your code here...\n\n"
+                    st.session_state.approach_implementation = ""
+                    st.rerun()
 
 def render_standard_input():
     """Render standard text input"""
@@ -631,13 +654,11 @@ def interview_page():
             st.session_state.current_page = "results"
             st.rerun()
 
-
 def handle_conversation_phase(state, current_phase):
     """Handle understanding and approach phases"""
     messages = state.get('messages', [])
     phase_complete = state.get(f'{current_phase}_complete', False)
     
-    # Determine message state
     last_message_is_human = len(messages) > 0 and isinstance(messages[-1], HumanMessage)
     last_message_is_ai = len(messages) > 0 and isinstance(messages[-1], AIMessage)
     needs_ai_response = len(messages) == 0 or last_message_is_human
@@ -647,7 +668,7 @@ def handle_conversation_phase(state, current_phase):
         if current_phase == 'understanding':
             if not st.session_state.get('ai_processing', False):
                 st.session_state.ai_processing = True
-                with st.spinner("Evaluating understanding phase..."):
+                with st.spinner("📊 Evaluating understanding phase..."):
                     try:
                         process_graph_stream()
                         st.session_state.ai_processing = False
@@ -664,7 +685,7 @@ def handle_conversation_phase(state, current_phase):
         elif current_phase == 'approach':
             if not st.session_state.get('ai_processing', False):
                 st.session_state.ai_processing = True
-                with st.spinner("Evaluating approach phase..."):
+                with st.spinner("📊 Evaluating approach phase..."):
                     try:
                         process_graph_stream()
                         st.session_state.ai_processing = False
@@ -699,16 +720,16 @@ def handle_conversation_phase(state, current_phase):
     st.session_state.ai_processing = False
     
     # Show input if waiting for user
-    show_input = not phase_complete and (last_message_is_ai or len(messages) == 0)
+    show_input = (not phase_complete) and (last_message_is_ai or len(messages) == 0)
     
     if show_input:
         current_activity = state.get('current_activity', '')
+        approach_count = state.get('approach_question_count', 0)
         
-        # Check for structured approach workspace
-        if current_phase == 'approach' and current_activity == 'awaiting_approach_structured':
+        # ✅ FIX: Check for approach phase and show workspace
+        if current_phase == 'approach':
             render_approach_workspace()
         else:
-            # Standard text input
             render_standard_input()
 
 
