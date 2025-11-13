@@ -2,7 +2,9 @@
 
 import os
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+# config.py
+from langchain_groq import ChatGroq  # fix module name
+
 
 # Load environment variables from .env file
 load_dotenv()
