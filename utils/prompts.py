@@ -191,160 +191,44 @@ STRUCTURE:
     
     @staticmethod
     def generate_understanding_followup(company_name: str, situation: str, problem: str, candidate_response: str, question_number: int, max_questions: int = 3, last_question: str = "") -> str:
-        """Generate conversational follow-up STRICTLY grounded in case study with smart deflection handling."""
+        """Generate targeted follow-up focused on specific probe area."""
         
-        probe_focus = {
-            1: "their initial assumptions and how they'd start analyzing THIS specific problem",
-            2: "what data or metrics they'd need for THIS case and how they'd validate their approach",
-            3: "implementation strategy for THIS company and potential challenges"
+        probes = {
+            1: "initial assumptions and analysis approach",
+            2: "data requirements and validation strategy", 
+            3: "implementation plan and key challenges"
         }
         
-        current_probe = probe_focus.get(question_number, probe_focus[1])
+        current_probe = probes.get(question_number, probes[1])
         
-        context_section = ""
-        if last_question and question_number > 1:
-            if "Case Started!" not in last_question and "Share your initial understanding" not in last_question:
-                context_section = f"""
-**PREVIOUS QUESTION:**
-"{last_question[:250]}"
+        return f"""Generate ONE follow-up question for {company_name} case interview (Question {question_number}/{max_questions}).
 
-**THEIR RESPONSE:**
-"{candidate_response[:350]}"
-"""
-        
-        return f"""You are conducting question {question_number} of {max_questions} in a case interview for {company_name}.
+    CASE CONTEXT:
+    Company: {company_name}
+    Problem: {problem[:300]}
+    Situation: {situation[:300]}
 
-**CASE DETAILS:**
-Company: {company_name}
-Situation: {situation[:400]}
-Problem: {problem[:400]}
+    CONVERSATION:
+    Last Question: "{last_question[:200]}"
+    Their Response: "{candidate_response[:400]}"
 
-{context_section}
+    PROBE FOCUS: {current_probe}
 
-**WHAT THEY JUST SAID:**
-"{candidate_response[:500]}"
+    TASK: Generate ONE question (25-40 words) that:
+    1. Probes their {current_probe} specifically for {company_name}
+    2. References the case details (not generic)
+    3. If they asked a question → answer briefly first, then probe
+    4. If they're confused → give 1-2 sentence hint, then probe
+    5. If they gave analysis → probe deeper on {current_probe}
 
-**YOUR TASK:**
-Generate a conversational response (50-80 words) that:
-1. Acknowledges what they said (if they're asking for help)
-2. Provides a brief case-specific hint/example (if needed)
-3. Asks ONE concrete follow-up question
+    FORMAT: Plain text, conversational, 25-40 words, ONE question only
 
-Output as plain text, conversational and supportive tone.
+    EXAMPLES:
+    ✅ "For {company_name}'s readmission challenge, what assumptions would you make about which patient factors most influence 30-day readmission risk?"
+    ✅ "Given {company_name}'s EHR and claims data, what specific metrics would you prioritize to validate your predictive model's accuracy?"
+    ✅ "How would you implement this solution for {company_name}, and what's the biggest technical challenge you'd anticipate?"
 
-**RESPONSE ANALYSIS - DETERMINE TYPE:**
-
-**TYPE 1: Asking for Clarification/Help (FIRST TIME)**
-Signs: "don't know", "need clarity", "explain", "not sure", "help me", "what does this mean"
-
-→ **Structure (50-70 words):**
-  [Acknowledgment] + [Case-specific hint with concrete details] + [Specific question]
-
-→ **Template:**
-"I understand. For {company_name}, [brief hint: mention 2-3 specific data sources, constraints, or context from the case]. Given this context, [specific concrete question about one element]?"
-
-→ **Example:**
-"I understand you need more context. For {company_name}'s situation regarding {problem[:50]}, they have access to [specific data/resources from case]. Considering this, which specific aspect would you prioritize analyzing first to address their challenge?"
-
-**TYPE 2: Persistent Deflection/Repeated Help Request**
-Signs: Similar request for help after you already gave hints in previous response
-
-→ **Structure (60-80 words):**
-  [More specific acknowledgment] + [Very concrete example with options] + [Simple choice question]
-
-→ **Template:**
-"Let me be more specific. For {company_name}, consider these factors related to {problem[:30]}: [Option A - specific detail], [Option B - specific detail], or [Option C - specific detail]. Which would you prioritize first and why?"
-
-→ **Example:**
-"Let me give you more specific options. For {company_name}'s challenge with {problem[:40]}, you could focus on: analyzing existing customer data patterns, investigating technical infrastructure limitations, or assessing market competition dynamics. Which of these would you tackle first?"
-
-**TYPE 3: Vague/Generic Response**
-Signs: Under 30 words, no case-specific details, could apply to any company
-
-→ **Structure (40-50 words):**
-  [Brief acknowledgment] + [Push for case-specificity]
-
-→ **Template:**
-"How would that approach specifically work for {company_name} given specific constraint from case? Walk me through your first concrete step with their actual situation."
-
-→ **Example:**
-"How would that approach specifically help {company_name} address {problem[:50]}? What would be your first concrete action given their constraints mentioned in the case?"
-
-**TYPE 4: Substantive & Case-Specific Response**
-Signs: 30+ words, mentions company/case details, shows reasoning
-
-→ **Structure (30-40 words):**
-  [Quote exact 3-5 words] + [Probe deeper with case context]
-
-→ **Template:**
-"You mentioned '[exact quote]'. How would you validate that approach for {company_name} given specific case constraint?"
-
-→ **Example:**
-"You mentioned 'customer segmentation analysis'. How would you validate those segments specifically for {company_name}'s situation with relevant case detail?"
-
-**TYPE 5: Off-topic/Irrelevant**
-Signs: Discussing something not in the case, inventing details
-
-→ **Structure (35-45 words):**
-  [Gentle redirect] + [Ground in case] + [Specific question]
-
-→ **Template:**
-"Coming back to {company_name}'s core challenge with {problem[:40]}, how would you [specific action related to actual case]?"
-
-**CRITICAL RULES:**
-
-1. **Always be helpful when they're struggling:**
-   - Don't just rephrase the same question
-   - Give actual hints/examples from the case details
-   - Make questions more concrete and specific
-   - Provide 2-3 concrete options if they're really stuck
-
-2. **Stay STRICTLY grounded in the case:**
-   - Every hint must reference {company_name}, {situation}, or {problem}
-   - Every example must come from the actual case details provided
-   - Every question must be case-specific
-   - Never invent details not in the case
-
-3. **Progressive help strategy:**
-   - First deflection: Brief hint + open question
-   - Repeated deflection: Detailed hint + choice-based question
-   - Never just keep asking without helping
-
-4. **Output format:**
-   - Plain text only, no markdown, no formatting
-   - Conversational and supportive tone (you're coaching, not testing)
-   - 50-80 words for deflection responses (includes hint)
-   - 30-50 words for good responses (just probe deeper)
-   - No quotation marks around entire output
-
-5. **Verification before output:**
-   ✓ Does it mention {company_name} or specific case element?
-   ✓ Is it tied to {situation} or {problem}?
-   ✓ Could this ONLY be asked about THIS case (not generic)?
-   ✓ Did I provide help if they asked for it?
-
-**GOOD EXAMPLES:**
-
-**For first deflection:**
-✅ "I understand. For {company_name}, the situation involves {situation[:60]}. They're dealing with {problem[:60]}. Given these specifics, what would be your first step in analyzing this challenge?"
-
-**For repeated deflection:**
-✅ "Let me be more specific. For {company_name}'s challenge with {problem[:50]}, you could analyze: their existing customer behavior data, assess technical infrastructure gaps, or review competitive positioning. Which would you prioritize first and why?"
-
-**For vague response:**
-✅ "How would that specifically help {company_name} with {problem[:50]}? Walk me through your first concrete action given their constraints."
-
-**For good response:**
-✅ "You mentioned 'data quality issues'. How would you validate data quality specifically for {company_name}'s situation with relevant detail from case?"
-
-**BAD EXAMPLES:**
-
-❌ "What would you analyze first?" (No company name, not case-specific, no help when they're struggling)
-❌ "Think about the data." (Too generic, no case reference)
-❌ "I already asked this. Please answer." (Dismissive, not helpful)
-❌ "You mentioned customer analysis..." (When they didn't - fabricating what they said)
-
-Now generate your response (plain text, case-grounded, helpful, 50-80 words if deflection, 30-50 words if good response):"""
+    Generate question focused on {current_probe} for {company_name}:"""
 
     # ========== APPROACH PHASE ==========
     
@@ -404,114 +288,44 @@ Now that we understand **{company_name}'s** challenge, outline your **solution a
     
     @staticmethod
     def generate_approach_followup(company_name: str, problem: str, candidate_response: str, question_number: int, is_technical: bool, last_question: str = "") -> str:
-        """Generate approach phase follow-up - stay case-grounded and probe depth."""
+        """Generate approach follow-up focused on specific probe area."""
         
-        probe_areas = {
-            1: "initial approach and framework structure",
-            2: "data requirements and validation strategy" if is_technical else "analysis methodology and prioritization",
+        probes = {
+            1: "framework structure and approach logic",
+            2: "data/validation strategy" if is_technical else "analysis methodology and prioritization",
             3: "implementation details and risk mitigation",
             4: "timeline, resources, and success metrics"
         }
         
-        current_focus = probe_areas.get(question_number, "implementation strategy")
+        current_focus = probes.get(question_number, "implementation strategy")
         
-        context_section = ""
-        if last_question and question_number > 1:
-            context_section = f"""
-**PREVIOUS QUESTION:**
-"{last_question[:200]}"
+        return f"""Generate ONE follow-up question for {company_name} approach phase (Q{question_number}/4).
 
-**THEIR RESPONSE:**
-"{candidate_response[:400]}"
-"""
-        
-        return f"""You are conducting approach question {question_number} of 4 for {company_name}.
+    CASE PROBLEM: {problem[:300]}
 
-**CASE PROBLEM:**
-{problem[:400]}
+    CONVERSATION:
+    Last Q: "{last_question[:150]}"
+    Response: "{candidate_response[:500]}"
 
-{context_section}
+    PROBE FOCUS: {current_focus}
 
-**WHAT THEY JUST SAID:**
-"{candidate_response[:600]}"
+    TASK: Generate ONE question (30-50 words) that:
+    1. Probes {current_focus} specifically for {company_name}
+    2. References case details (not generic)
+    3. Pushes for concrete, case-specific details
+    4. If generic response → ask "How specifically for {company_name}?"
+    5. If strong response → probe deeper on one specific element
 
-**YOUR TASK:**
-Generate ONE follow-up question (40-60 words) that probes their {current_focus} **specifically for {company_name}**.
+    {'TECHNICAL FOCUS: Algorithms, data pipelines, architecture, metrics for THIS case' if is_technical else 'BUSINESS FOCUS: Framework customization, prioritization, stakeholder management, ROI for THIS case'}
 
-**CRITICAL RULES:**
+    FORMAT: Plain text, 30-50 words, ONE question, must mention {company_name}
 
-1. **STAY STRICTLY CASE-GROUNDED:**
-   - Every question must reference {company_name}
-   - Reference specific details from the problem statement
-   - Push for case-specific details, not generic answers
-   - If they gave generic advice, ask: "How does that specifically apply to {company_name}?"
+    EXAMPLES:
+    ✅ "You mentioned collaborative filtering. How would you validate that works for {company_name}'s sparse data, and what's your fallback if accuracy drops below 80%?"
+    ✅ "How would you prioritize which customer segments {company_name} analyzes first, given their 6-month timeline and limited data quality?"
+    ✅ "What specific technical architecture would you build for {company_name}'s scale, and how would you handle their real-time processing requirements?"
 
-2. **DETECT RESPONSE QUALITY:**
-
-   **If Generic/Vague (no company mention, could apply to any case):**
-   → Push for specificity
-   → "How would that specifically work for {company_name} given [constraint from case]? What's your first concrete step?"
-   
-   **If Missing Key Details:**
-   → Probe the gap
-   → "You mentioned [topic]. How would you specifically [action] for {company_name} considering [case detail]?"
-   
-   **If Strong & Case-Specific:**
-   → Go deeper on one element
-   → "You mentioned '[exact 3-5 word quote]'. How would you validate/implement that for {company_name}?"
-   
-   **If Off-topic:**
-   → Redirect firmly
-   → "Coming back to {company_name}'s challenge with [problem aspect], how would you [specific action]?"
-
-3. **TECHNICAL CASES - Probe for:**
-   - Specific algorithms/models **for this case**
-   - Data pipelines **for {company_name}'s** data
-   - Architecture decisions **given this problem**
-   - Performance metrics **relevant to this case**
-
-4. **NON-TECHNICAL CASES - Probe for:**
-   - Analysis framework **customized to {company_name}**
-   - Prioritization logic **for this situation**
-   - Stakeholder management **in this case**
-   - ROI/metrics **specific to {company_name}**
-
-5. **OUTPUT FORMAT:**
-   - Plain text, no formatting
-   - 40-60 words
-   - Direct question only
-   - Must mention {company_name} or specific case element
-
-6. **FORBIDDEN:**
-   - ❌ Generic questions without case reference
-   - ❌ Accepting generic frameworks without customization
-   - ❌ Meta-commentary or explanations
-   - ❌ Inventing details not in the case
-
-**VERIFICATION CHECKLIST:**
-✓ Does it mention {company_name} or specific case element?
-✓ Does it push for case-specific details (not generic)?
-✓ Does it probe depth on {current_focus}?
-✓ Is it 40-60 words, plain text?
-
-**GOOD EXAMPLES:**
-
-For generic response:
-✅ "You mentioned using a recommendation system. What specific algorithm would fit {company_name}'s data characteristics, and how would you handle their incomplete customer records?"
-
-For missing details:
-✅ "How would you prioritize which customer segments {company_name} should analyze first, given their limited data quality and 6-month timeline?"
-
-For strong response:
-✅ "You mentioned 'collaborative filtering'. How would you validate that approach works for {company_name}'s sparse data, and what's your fallback strategy?"
-
-**BAD EXAMPLES:**
-
-❌ "What algorithm would you use?" (No company reference, too generic)
-❌ "Tell me more about your approach." (Vague, no depth)
-❌ "How would you implement this?" (Not case-specific)
-
-Now generate your follow-up question (40-60 words, case-grounded, probing {current_focus}):"""
+    Generate question probing {current_focus} for {company_name}:"""
 
     # ========== EVALUATION PHASE ==========
     
