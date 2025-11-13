@@ -1,4 +1,4 @@
-# interview_nodes.py - Complete updated version with unified prompts
+# interview_nodes.py - Complete production version with all updates
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from config import get_llm_for_task
@@ -13,7 +13,6 @@ class CaseStudyInterviewNodes:
     
     def extract_json(self, text: str) -> dict:
         """Extract JSON from LLM response with multiple fallback strategies."""
-        
         if not text:
             return {}
         
@@ -304,6 +303,7 @@ Generating your case study..."""
         problem = str(case_study.get('problem_statement', 'the given problem'))
         company_name = str(case_study.get('company_name', 'the company'))
         situation = str(case_study.get('situation', 'the situation at hand'))
+        
         # Get last human message
         last_human_msg = None 
         last_messages = messages[-2:] if len(messages) >= 2 else messages
@@ -311,34 +311,31 @@ Generating your case study..."""
             if isinstance(msg, HumanMessage):
                 last_human_msg = msg.content
                 break
-        print(f"DEBUG: Previous human response: {last_human_msg} ")
+        
+        print(f"[DEBUG] Previous human response: {last_human_msg}")
+        
         if count >= max_questions:
             return {"understanding_complete": True, "current_activity": "phase_complete"}
         
         if not last_human_msg:
             return {"current_activity": "awaiting_understanding"}
         
-        # EXTRACT PREVIOUS AI QUESTION (for context)
-        # In understanding_node function:
-
-# EXTRACT PREVIOUS AI QUESTION (for context)
+        # Extract previous AI question (for context)
         last_ai_question = ""
         if len(messages) >= 2:
-            for msg in reversed(messages[-3:]):  # Look at last 3 messages
+            for msg in reversed(messages[-3:]):
                 if isinstance(msg, AIMessage):
-                    # Skip the case study generation message
                     if "Case Started!" not in msg.content and "Share your initial understanding" not in msg.content:
                         last_ai_question = msg.content
                         break
-                    # If it's the first question ("Share your initial understanding"), pass empty string
-                    elif "Share your initial understanding" in msg.content and count == 1:
-                        last_ai_question = ""  # Don't include case study question
+                    elif "Share your initial understanding" in msg.content and count == 0:
+                        last_ai_question = ""
                         break
-
-        print(f"[DEBUG]  AI question (filtered): {last_ai_question}")
-
-        print(f"DEBUG:  candidate  response: {last_human_msg} ")
-        llm = get_llm_for_task('conversation', temperature=0.15)
+        
+        print(f"[DEBUG] AI question (filtered): {last_ai_question}")
+        print(f"[DEBUG] Candidate response: {last_human_msg}")
+        
+        llm = get_llm_for_task('conversation', temperature=0.0)
         
         # Generate follow-up with previous question context
         prompt = CaseInterviewPrompts.generate_understanding_followup(
@@ -348,15 +345,15 @@ Generating your case study..."""
             str(last_human_msg),
             count + 1, 
             max_questions,
-            last_ai_question  # Pass previous question
+            last_ai_question
         )
         
         try:
             response = llm.invoke([SystemMessage(content=prompt)])
-            question = response.content.strip().replace('**', '').replace('*', '')
+            question = response.content.strip().replace('**', '').replace('*', '').replace('"', '')
         except Exception as e:
-            print(f"DEBUG: Error generating understanding Q{count+1}: {e}")
-            question = "Can you elaborate on your reasoning about this situation?"
+            print(f"[DEBUG] Error generating understanding Q{count+1}: {e}")
+            question = f"Can you elaborate on how that specifically applies to {company_name}?"
         
         return {
             "messages": [AIMessage(content=question)],
@@ -364,11 +361,12 @@ Generating your case study..."""
             "current_activity": "awaiting_understanding"
         }
 
-
     def understanding_evaluation_node(self, state: dict) -> dict:
         """Evaluate understanding phase using STRICT centralized prompt."""
-        print("DEBUG: Evaluating understanding phase")
-        evaluation = self._evaluate_phase(state, 'understanding')
+        print("[DEBUG] Evaluating understanding phase")
+        evaluation = self.evaluate_phase(state, 'understanding')
+        
+        print(f"[DEBUG] understanding evaluation - score={evaluation.get('score', 0)}")
         
         return {
             "understanding_evaluation": evaluation,
@@ -391,6 +389,7 @@ Generating your case study..."""
         
         company_name = case_study.get("company_name", "the company")
         problem = str(case_study.get("problem_statement", ""))
+        situation = str(case_study.get("situation", ""))
         role = state.get("role", "general")
         tech_type = state.get("tech_type", "")
         is_technical = tech_type == "Technical"
@@ -422,7 +421,7 @@ Generating your case study..."""
                     last_ai_question = msg.content
                     break
             
-            # Generate follow-up with new prompt
+            # Generate follow-up
             llm = get_llm_for_task("conversation", temperature=0.0)
             
             followup_prompt = CaseInterviewPrompts.generate_approach_followup(
@@ -452,11 +451,12 @@ Generating your case study..."""
             "current_activity": "awaiting_approach"
         }
 
-
     def approach_evaluation_node(self, state: dict) -> dict:
         """Evaluate approach phase using STRICT centralized prompt."""
-        print("DEBUG: Evaluating approach phase")
-        evaluation = self._evaluate_phase(state, 'approach')
+        print("[DEBUG] Evaluating approach phase")
+        evaluation = self.evaluate_phase(state, 'approach')
+        
+        print(f"[DEBUG] approach evaluation - score={evaluation.get('score', 0)}")
         
         return {
             "approach_evaluation": evaluation,
@@ -548,7 +548,8 @@ Generating your case study..."""
             except json.JSONDecodeError as e:
                 last_error = f"JSON parsing error: {str(e)}"
                 print(f"[ERROR] {last_error}")
-                print(f"[DEBUG] Raw response: {response.content[:500] if response else 'None'}")
+                if response:
+                    print(f"[DEBUG] Raw response: {response.content[:500]}")
                 
             except ValueError as e:
                 last_error = f"Validation error: {str(e)}"
@@ -571,7 +572,7 @@ Generating your case study..."""
             candidate_responses = [pair["response"][:200] for pair in conversation_pairs[:3]]
             
             evaluation = {
-                "score": 5.0,  # Neutral score when evaluation fails
+                "score": 5.0,
                 "strengths": ["Participated in the interview"],
                 "weaknesses": [
                     "Unable to generate detailed evaluation due to system error",
@@ -587,8 +588,8 @@ Generating your case study..."""
                 "depth_score": 5.0,
                 "response_quality_score": 5.0,
                 "overall_comment": f"Evaluation for {phase_name} phase could not be completed due to system error. "
-                                f"The candidate provided {len(conversation_pairs)} responses. "
-                                f"Manual review is recommended. Error: {last_error}",
+                                 f"The candidate provided {len(conversation_pairs)} responses. "
+                                 f"Manual review is recommended. Error: {last_error}",
                 "evaluation_error": True,
                 "error_details": last_error
             }
@@ -613,7 +614,7 @@ Generating your case study..."""
         
         # Check for phase evaluation errors
         has_errors = (understanding_eval.get("evaluation_error") or 
-                    approach_eval.get("evaluation_error"))
+                      approach_eval.get("evaluation_error"))
         
         if has_errors:
             error_msg = "⚠️ **Evaluation Issues Detected**\n\n"
@@ -684,10 +685,10 @@ Generating your case study..."""
                 "overall_score": avg_score,
                 "performance_level": "Competent" if avg_score >= 5 else "Developing",
                 "interview_summary": f"Interview completed with {len(candidate_responses)} responses. "
-                                f"Automated evaluation encountered errors. "
-                                f"Phase scores - Understanding: {understanding_eval.get('score', 'N/A')}, "
-                                f"Approach: {approach_eval.get('score', 'N/A')}. "
-                                f"Manual review recommended.",
+                                   f"Automated evaluation encountered errors. "
+                                   f"Phase scores - Understanding: {understanding_eval.get('score', 'N/A')}, "
+                                   f"Approach: {approach_eval.get('score', 'N/A')}. "
+                                   f"Manual review recommended.",
                 "dimension_scores": [
                     {
                         "dimension": "Domain Expertise & Technical Skills",
@@ -742,7 +743,6 @@ Generating your case study..."""
             "completion_time": time.time()
         }
 
-
     # ========== ROUTING ==========
     
     def route_by_activity(self, state: dict) -> str:
@@ -750,7 +750,7 @@ Generating your case study..."""
         current_activity = state.get('current_activity', '')
         current_phase = state.get('current_phase', 'classification')
         
-        print(f"DEBUG: Routing - phase={current_phase}, activity={current_activity}")
+        print(f"[ROUTER] Phase: {current_phase}, Activity: {current_activity}")
         
         # Validation routing
         if state.get('validation_failed'):
@@ -785,13 +785,13 @@ Generating your case study..."""
             return "final_evaluation"
         
         # Default fallback
-        print(f"DEBUG: Using fallback routing")
+        print(f"[DEBUG] Using fallback routing")
         return "generate_mcq"
 
     def handle_validation_failed(self, state: dict) -> dict:
         """Handle validation failure - return to awaiting state."""
-        print("DEBUG: Handling validation failure")
+        print("[DEBUG] Handling validation failure")
         return {
             "current_activity": state.get('current_activity', 'awaiting_understanding'),
-            "validation_failed": False  # Reset for next attempt
+            "validation_failed": False
         }
