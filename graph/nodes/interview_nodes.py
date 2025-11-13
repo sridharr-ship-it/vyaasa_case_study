@@ -1,6 +1,4 @@
---- START OF FILE interview_nodes.py ---
-
-
+# interview_nodes.py - Complete updated version with unified prompts
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from config import get_llm_for_task
@@ -8,9 +6,10 @@ import json
 import re
 import time
 from utils.prompts import CaseInterviewPrompts
+
+
 class CaseStudyInterviewNodes:
-    """Fixed interview node logic with proper phase management and no case regeneration."""
-    
+    """Interview node logic - all prompts centralized in utils.prompts."""
     
     def extract_json(self, text: str) -> dict:
         """Extract JSON from LLM response with multiple fallback strategies."""
@@ -34,7 +33,7 @@ class CaseStudyInterviewNodes:
             except json.JSONDecodeError:
                 pass
         
-        # Strategy 3: Find JSON object directly using balanced braces
+        # Strategy 3: Find JSON object directly
         brace_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
         if brace_match:
             try:
@@ -42,69 +41,116 @@ class CaseStudyInterviewNodes:
             except json.JSONDecodeError:
                 pass
         
-        # If all strategies fail, return empty dict
         return {}
-
     
-    # ========== MCQ CLASSIFICATION NODES ==========
+    def validate_response_length(self, state: dict) -> dict:
+        """Validation node - check minimum word requirements."""
+        messages = state.get('messages', [])
+        current_activity = state.get('current_activity', '')
+        
+        if not messages:
+            return state
+        
+        last_human_msg = None
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                last_human_msg = msg.content
+                break
+        
+        if not last_human_msg:
+            return state
+        
+        word_count = len(last_human_msg.split())
+        
+        if current_activity == 'awaiting_approach_structured':
+            min_words = 250
+            error_context = "comprehensive approach"
+        else:
+            min_words = 10
+            error_context = "response"
+        
+        if word_count < min_words:
+            error_msg = f"""⚠️ **Response Too Short**
+
+Your {error_context} needs at least **{min_words} words** for proper evaluation.
+
+**Current:** {word_count} words | **Required:** {min_words} words
+
+Please provide a more detailed response."""
+            
+            messages = messages[:-1]
+            messages.append(AIMessage(content=error_msg))
+            
+            return {
+                'messages': messages,
+                'validation_failed': True
+            }
+        
+        return {'validation_failed': False}
+    
+    # ========== MCQ CLASSIFICATION PHASE ==========
     
     def generate_mcq_node(self, state: dict) -> dict:
         """Generate MCQ questions ONE AT A TIME."""
-        role = state.get('role', ' ')
+        role = state.get('role', '')
         skills = ', '.join(state.get('skills', []))
         mcq_current = state.get('mcq_current_question', 0)
-
-        if len(state.get('mcq_answers', [])) >= 3:
-            return {"current_activity": "processing_mcq"}
-
+        answers = state.get('classification_answers', [])
+        
+        if len(answers) >= 3 or mcq_current >= 3:
+            print("DEBUG: MCQ complete")
+            return {
+                "mcq_completed": True,
+                "current_activity": "processing_mcq"
+            }
+        
         llm = get_llm_for_task('mcq', temperature=0.5)
         prompt = CaseInterviewPrompts.generate_mcq_questions(role, skills, mcq_current + 1)
         response = llm.invoke([SystemMessage(content=prompt)])
         
         question_data = self.extract_json(response.content)
-
-        # Properly formatted fallback with valid JSON structure
-        if not question_data or 'question' not in question_data or 'options' not in question_data:
+        
+        if not question_data or 'question' not in question_data:
             fallback_questions = [
                 {
-                    "question": "What type of problems do you prefer working on?",
+                    "question": "What type of problems do you prefer?",
                     "options": [
-                        {"letter": "A", "text": "Data analysis and pattern discovery"},
-                        {"letter": "B", "text": "Strategic planning and recommendations"},
-                        {"letter": "C", "text": "Technical system design"},
-                        {"letter": "D", "text": "Operational/process optimization"},
+                        {"letter": "A", "text": "Data analysis"},
+                        {"letter": "B", "text": "Strategic planning"},
+                        {"letter": "C", "text": "Technical design"},
+                        {"letter": "D", "text": "Process optimization"},
                     ]
                 },
                 {
-                    "question": "Which industry are you most interested in?",
+                    "question": "Which industry interests you most?",
                     "options": [
                         {"letter": "A", "text": "Finance/Banking"},
-                        {"letter": "B", "text": "Healthcare/Life Sciences"},
-                        {"letter": "C", "text": "Technology/E‑commerce"},
+                        {"letter": "B", "text": "Healthcare"},
+                        {"letter": "C", "text": "Technology"},
                         {"letter": "D", "text": "Other"},
                     ]
                 },
                 {
-                    "question": "What case complexity do you prefer?",
+                    "question": "Preferred case complexity?",
                     "options": [
-                        {"letter": "A", "text": "Well‑defined problems with clear metrics"},
-                        {"letter": "B", "text": "Open‑ended exploratory analysis"},
-                        {"letter": "C", "text": "Mixed – structured and exploratory"},
-                        {"letter": "D", "text": "Real‑time decision making"},
+                        {"letter": "A", "text": "Well-defined problems"},
+                        {"letter": "B", "text": "Open-ended analysis"},
+                        {"letter": "C", "text": "Mixed approach"},
+                        {"letter": "D", "text": "Real-time decisions"},
                     ]
                 },
             ]
-            question_data = fallback_questions[min(mcq_current, len(fallback_questions) - 1)]
-
-        # Now question_data is guaranteed to have 'question' and 'options'
-        mcq_message = f"📋 Classification Question {mcq_current + 1}\n {question_data['question']}\n\n"
+            question_data = fallback_questions[min(mcq_current, 2)]
+        
+        mcq_message = f"📋 Question {mcq_current + 1}/3\n\n{question_data['question']}\n\n"
         for opt in question_data['options']:
             mcq_message += f"{opt['letter']}. {opt['text']}\n"
-        mcq_message += "\nPlease respond with your answer (A, B, C, or D)"
-
+        mcq_message += "\nPlease respond with A, B, C, or D"
+        
         current_questions = state.get('mcq_questions', [])
         current_questions.append(question_data)
-
+        
+        print(f"DEBUG: Generated MCQ {mcq_current + 1}/3")
         return {
             "mcq_questions": current_questions,
             "mcq_current_question": mcq_current + 1,
@@ -113,40 +159,45 @@ class CaseStudyInterviewNodes:
         }
 
     def process_mcq_answers_node(self, state: dict) -> dict:
-        """Process MCQ answers to determine domain, industry, and case type."""
+        """Process MCQ answers using centralized prompt."""
+        if state.get('mcq_completed') and state.get('domain'):
+            print("DEBUG: MCQ already processed")
+            return {
+                "current_phase": "understanding",
+                "current_activity": "awaiting_understanding"
+            }
+        
         mcq_questions = state.get('mcq_questions', [])
         classification_answers = state.get('classification_answers', [])
-
+        
+        if len(classification_answers) != 3:
+            print(f"DEBUG: Need 3 answers, got {len(classification_answers)}")
+            return {}
+        
         role = state.get('role', '')
         skills = ', '.join(state.get('skills', []))
         
         llm = get_llm_for_task('fast', temperature=0.5)
-        prompt = CaseInterviewPrompts.interpret_mcq_answers(mcq_questions,classification_answers,role,skills)
-        
-    
+        prompt = CaseInterviewPrompts.interpret_mcq_answers(mcq_questions, classification_answers, role, skills)
         
         response = llm.invoke([SystemMessage(content=prompt)])
         interpretation = self.extract_json(response.content)
         
-        # Safely extract values
-        domain = str(interpretation.get('domain'))
-        industry = str(interpretation.get('industry'))
-        case_type = str(interpretation.get('case_type'))
-        tech_type = str(interpretation.get('tech_type'))
-        
-        # Format case type for display
-        case_type_display = case_type.replace('_', ' ').title()
+        domain = str(interpretation.get('domain', 'Data Science'))
+        industry = str(interpretation.get('industry', 'Technology'))
+        case_type = str(interpretation.get('case_type', 'problem_solving'))
+        tech_type = str(interpretation.get('tech_type', 'Technical'))
         
         confirmation_msg = f"""**Classification Complete!**
 
-Based on your responses:
 - **Domain**: {domain}
 - **Industry**: {industry}
-- **Case Type**: {case_type_display}
+- **Case Type**: {case_type.replace('_', ' ').title()}
 - **Tech Type**: {tech_type}
 
-Generating your personalized case study..."""
+Generating your case study..."""
         
+        print(f"DEBUG: Classification - {domain}, {industry}, {tech_type}")
         return {
             "domain": domain,
             "industry": industry,
@@ -154,37 +205,33 @@ Generating your personalized case study..."""
             'tech_type': tech_type,
             "mcq_completed": True,
             "messages": [AIMessage(content=confirmation_msg)],
+            "current_phase": "case_gen",
             "current_activity": "generating_case",
-            
         }
     
-    # ========== CASE GENERATION NODE ==========
+    # ========== CASE GENERATION ==========
     
     def generate_case_node(self, state: dict) -> dict:
-        """Generate case study and DISPLAY it before asking questions.
-        
-        CRITICAL FIX: Prevent regeneration if case already exists.
-        """
-        # *** FIX #1: Don't regenerate if case already exists ***
+        """Generate case study using centralized prompt."""
         if state.get('case_study') and state.get('case_study').get('company_name'):
-            print(f"DEBUG: Case already exists ({state['case_study'].get('company_name')}), skipping regeneration")
+            print("DEBUG: Case already exists")
             return {
                 "current_phase": "understanding",
-                "current_activity": "awaiting_understanding"
+                "current_activity": "awaiting_understanding",
+                "understanding_question_count": 0
             }
         
         domain = state.get('domain', 'Data Science')
         industry = state.get('industry', 'Healthcare')
         case_type = state.get('case_type', 'problem_solving')
         role = state.get('role', 'Data Analyst')
-        tech_type = state.get('tech_type','Technical')
+        tech_type = state.get('tech_type', 'Technical')
         skills = ', '.join(state.get('skills', []))
         
-        print(f"DEBUG: Generating NEW case for {industry} {domain}")
+        print(f"DEBUG: Generating case - {industry} {domain}")
         
         llm = get_llm_for_task('case_generation', temperature=0.5)
-        
-        prompt = CaseInterviewPrompts.generate_case_study(domain,industry,case_type,role,skills,tech_type)
+        prompt = CaseInterviewPrompts.generate_case_study(domain, industry, case_type, role, skills, tech_type)
         response = llm.invoke([SystemMessage(content=prompt)])
         case_data = self.extract_json(response.content)
         
@@ -192,30 +239,24 @@ Generating your personalized case study..."""
             case_data = {
                 "title": f"{industry} {domain} Challenge",
                 "company_name": f"{industry} Solutions Inc.",
-                "company_context": f"Leading {industry} company",
                 "situation": f"Challenges in {domain.lower()}",
                 "problem_statement": f"Solve critical {domain.lower()} problem",
-                "objective": "Improve key metrics by 15%",
                 "initial_information": {
-                    "known_facts": ["Historical data available", "Current performance below benchmark"],
+                    "known_facts": ["Data available"],
                     "constraints": ["Budget: $500K", "Timeline: 6 months"],
-                    "stakeholders": ["Executive team", "Operations", "Customers"]
+                    "stakeholders": ["Executive team", "Operations"]
                 }
             }
         
-        # FORMAT CASE PRESENTATION
-        case_message = f"""
-🎯 **CASE STUDY: {case_data.get('title', 'Business Challenge')}**
+        case_message = f"""🎯 **CASE STUDY: {case_data.get('title', 'Challenge')}**
 
-**Company:** {case_data.get('company_name', 'Unknown Company')}
-
+**Company:** {case_data.get('company_name', 'Unknown')}
 
 **Situation:**
 {case_data.get('situation', 'N/A')}
 
-**Problem Statement:**
+**Problem:**
 {case_data.get('problem_statement', 'N/A')}
-
 
 """
         
@@ -232,635 +273,525 @@ Generating your personalized case study..."""
                 case_message += f"- {constraint}\n"
         
         if initial_info.get('stakeholders'):
-            case_message += "\n**Key Stakeholders:**\n"
+            case_message += "\n**Stakeholders:**\n"
             for stakeholder in initial_info['stakeholders']:
                 case_message += f"- {stakeholder}\n"
         
-        case_message += """
----
-
-⏱️ **case study  Started!**
-
-Please share your **initial understanding** of this problem. What are the key issues you identify?
-
-💡 *Note: If you need clarification, data, or hints, just ask naturally - I'll help you.*
-"""
+        case_message += "\n---\n\n⏱️ **Case Started!**\n\nShare your **initial understanding** of this problem.\n\n💡 *Minimum 10 words required.*"
         
-        print(f"DEBUG: Case generated: {case_data.get('company_name', 'Unknown')}")
-        
-        # Start timer and move to understanding phase
+        print(f"DEBUG: Case generated - {case_data.get('company_name')}")
         return {
             "case_study": case_data,
             "messages": [AIMessage(content=case_message)],
             "current_phase": "understanding",
             "current_activity": "awaiting_understanding",
-            "understanding_question_count": 0,  # Reset counter
+            "understanding_question_count": 0,
             "interview_start_time": time.time(),
-            "understanding_complete": False
         }
     
     # ========== UNDERSTANDING PHASE ==========
+    
     def understanding_node(self, state: dict) -> dict:
-        """Understanding phase - ask 3 probing questions.
-        
-        *** FIX #2: Handle initial minimal responses properly ***
-        """
+        """Understanding phase - using unified prompt function."""
         messages = state.get('messages', [])
         case_study = state.get('case_study', {})
         count = state.get('understanding_question_count', 0)
         max_questions = 3
         
-        company_name = case_study.get('company_name', 'the company')
-        problem = case_study.get('problem_statement', '')
+        if state.get('validation_failed'):
+            return {"current_activity": "awaiting_understanding"}
         
+        problem = str(case_study.get('problem_statement', 'the given problem'))
+        company_name = str(case_study.get('company_name', 'the company'))
+        situation = str(case_study.get('situation', 'the situation at hand'))
         # Get last human message
-        last_human_msg = None
-        for msg in reversed(messages):
+        last_human_msg = None 
+        last_messages = messages[-2:] if len(messages) >= 2 else messages
+        for msg in last_messages:
             if isinstance(msg, HumanMessage):
                 last_human_msg = msg.content
                 break
-        
-        print(f"DEBUG: Understanding - count={count}/{max_questions}, has_response={bool(last_human_msg)}")
-        
-        # *** CRITICAL FIX: If count=0 and we HAVE a response, this is the FIRST user response ***
-        if count == 0 and last_human_msg:
-            print(f"DEBUG: Initial response received: '{last_human_msg}...', generating first follow-up question")
-            
-            llm = get_llm_for_task('conversation', temperature=0.5)
-            
-            system_prompt = f"""The candidate just gave their initial understanding of {company_name}'s problem.
-
-**Their response:** {last_human_msg}
-
-Generate ONE focused follow-up question to probe deeper into their understanding.
-Ask about their assumptions, what data they'd need, or what constraints they see.
-
-Keep it under 80 words, NO markdown, just the question."""
-            
-            response = llm.invoke([SystemMessage(content=system_prompt)])
-            question_text = response.content.strip().replace('**', '').replace('*', '')
-            
-            print(f"DEBUG: Generated first follow-up question, incrementing count to 1")
-            
-            return {
-                "messages": [AIMessage(content=question_text)],
-                "understanding_question_count": 1,  # *** INCREMENT to 1 ***
-                "current_activity": "awaiting_understanding"
-            }
-        
-        # If count=0 and no response, case was just shown - wait
-        if count == 0 and not last_human_msg:
-            print(f"DEBUG: Waiting for candidate's initial understanding")
-            return {
-                "current_activity": "awaiting_understanding"
-            }
-        
-        # If phase complete, move to evaluation
+        print(f"DEBUG: Previous human response: {last_human_msg} ")
         if count >= max_questions:
-            print(f"DEBUG: Understanding COMPLETE")
-            return {
-                "understanding_complete": True,
-                "current_activity": "phase_complete"
-            }
+            return {"understanding_complete": True, "current_activity": "phase_complete"}
         
-        # If we asked a question but no response yet, wait
-        if count > 0 and not last_human_msg:
-            print(f"DEBUG: Waiting for response to question {count}")
-            return {
-                "current_activity": "awaiting_understanding"
-            }
+        if not last_human_msg:
+            return {"current_activity": "awaiting_understanding"}
         
-        # Generate next follow-up question (count is 1 or 2 at this point)
-        llm = get_llm_for_task('conversation', temperature=0.5)
+        # EXTRACT PREVIOUS AI QUESTION (for context)
+        # In understanding_node function:
+
+# EXTRACT PREVIOUS AI QUESTION (for context)
+        last_ai_question = ""
+        if len(messages) >= 2:
+            for msg in reversed(messages[-3:]):  # Look at last 3 messages
+                if isinstance(msg, AIMessage):
+                    # Skip the case study generation message
+                    if "Case Started!" not in msg.content and "Share your initial understanding" not in msg.content:
+                        last_ai_question = msg.content
+                        break
+                    # If it's the first question ("Share your initial understanding"), pass empty string
+                    elif "Share your initial understanding" in msg.content and count == 1:
+                        last_ai_question = ""  # Don't include case study question
+                        break
+
+        print(f"[DEBUG]  AI question (filtered): {last_ai_question}")
+
+        print(f"DEBUG:  candidate  response: {last_human_msg} ")
+        llm = get_llm_for_task('conversation', temperature=0.15)
         
-        system_prompt = f"""You are conducting understanding phase question {count + 1} of {max_questions}.
-
-CRITICAL: ONLY mention "{company_name}" - NO other company names!
-
-**Case Details:**
-Company: {company_name}
-Problem: {problem}
-
-**Candidate's Last Response:**
-{last_human_msg[:500] if last_human_msg else "Initial response"}
-
-**YOUR TASK:**
-Generate ONE focused probing question about their understanding.
-
-**RULES:**
-1. Reference what THEY said
-2. Make it specific to {company_name}
-3. Keep under 80 words
-4. NO markdown, just the question
-
-Return ONLY the question text."""
+        # Generate follow-up with previous question context
+        prompt = CaseInterviewPrompts.generate_understanding_followup(
+            company_name,
+            situation,
+            problem,
+            str(last_human_msg),
+            count + 1, 
+            max_questions,
+            last_ai_question  # Pass previous question
+        )
         
         try:
-            response = llm.invoke([SystemMessage(content=system_prompt)])
-            question_text = response.content.strip().replace('**', '').replace('*', '')
+            response = llm.invoke([SystemMessage(content=prompt)])
+            question = response.content.strip().replace('**', '').replace('*', '')
         except Exception as e:
-            print(f"DEBUG: Error: {e}")
-            question_text = f"Can you elaborate on the key constraints that {company_name} faces?"
-        
-        print(f"DEBUG: Generated understanding question {count + 1}/{max_questions}")
+            print(f"DEBUG: Error generating understanding Q{count+1}: {e}")
+            question = "Can you elaborate on your reasoning about this situation?"
         
         return {
-            "messages": [AIMessage(content=question_text)],
+            "messages": [AIMessage(content=question)],
             "understanding_question_count": count + 1,
             "current_activity": "awaiting_understanding"
         }
-    
+
+
     def understanding_evaluation_node(self, state: dict) -> dict:
-        """Silent evaluation of understanding phase."""
+        """Evaluate understanding phase using STRICT centralized prompt."""
+        print("DEBUG: Evaluating understanding phase")
         evaluation = self._evaluate_phase(state, 'understanding')
-        
-        print(f"DEBUG: Understanding evaluation complete. Moving to approach phase.")
         
         return {
             "understanding_evaluation": evaluation,
             "current_phase": "approach",
-            "approach_question_count": 0,  # Reset counter for approach
-            "approach_complete": False,
+            "approach_question_count": 0,
             "current_activity": "awaiting_approach"
         }
     
     # ========== APPROACH PHASE ==========
     
     def approach_node(self, state: dict) -> dict:
-        """Approach phase - ask 4 questions about their solution approach.
-        FIRST question gets structured workspace (3 tabs for technical, 1 for non-technical).
-        """
-        messages = state.get('messages', [])
-        case_study = state.get('case_study', {})
-        role = state.get('role', 'Analyst')
-        skills = state.get('skills', [])
-        tech_type = state.get("tech_type", '')
-        is_technical_role = tech_type == "Technical"
-        count = state.get('approach_question_count', 0)
+        """Approach phase - comprehensive solution design with strict case-grounding."""
+        messages = state.get("messages", [])
+        case_study = state.get("case_study", {})
+        count = state.get("approach_question_count", 0)
         max_questions = 4
-        company_name = case_study.get('company_name', 'the company')
-        problem = case_study.get('problem_statement', '')
+        
+        if state.get("validation_failed"):
+            return {"current_activity": "awaiting_approach"}
+        
+        company_name = case_study.get("company_name", "the company")
+        problem = str(case_study.get("problem_statement", ""))
+        role = state.get("role", "general")
+        tech_type = state.get("tech_type", "")
+        is_technical = tech_type == "Technical"
         
         # Get last human message
         last_human_msg = None
-        for msg in reversed(messages):
+        for msg in reversed(messages[-3:]):
             if isinstance(msg, HumanMessage):
                 last_human_msg = msg.content
                 break
         
-        print(f"DEBUG: Approach - count={count}/{max_questions}, tech={is_technical_role}, has_response={bool(last_human_msg)}")
+        print(f"[DEBUG] Approach - count={count}/{max_questions}, role={role}, tech={is_technical}")
         
-        # Check if complete
         if count >= max_questions:
-            print(f"DEBUG: Approach COMPLETE")
-            return {
-                "approach_complete": True,
-                "current_activity": "phase_complete"
-            }
+            return {"approach_complete": True, "current_activity": "phase_complete"}
         
-        # First time (count=0) - generate STRUCTURED framework question
-        if count == 0:
-            llm = get_llm_for_task('conversation', temperature=0.7)
+        # Generate first question or follow-up
+        if count == 0 or not last_human_msg:
+            prompt = CaseInterviewPrompts.generate_first_approach_question(
+                company_name, problem, role, is_technical
+            )
+            question = prompt
+            print(f"[DEBUG] Generated approach Q1 - structured framework for {company_name}")
+        else:
+            # Get previous AI question
+            last_ai_question = ""
+            for msg in reversed(messages[-5:]):
+                if isinstance(msg, AIMessage):
+                    last_ai_question = msg.content
+                    break
             
-            # Build framework instruction based on technical vs non-technical
-            framework_guidance = f"""📊 **Approach Phase - Framework Development**
-
-    Now that we understand {company_name}'s problem, I'd like you to **document your solution approach**.
-
-    **Please provide:**
-
-    1. **Framework Structure**: Outline your overall framework or methodology
-    - What major steps or phases would you follow?
-    - What key areas need analysis?
-    - How would you structure your approach?
-    """
+            # Generate follow-up with new prompt
+            llm = get_llm_for_task("conversation", temperature=0.0)
             
-            if is_technical_role:
-                framework_guidance += """
-    2. **Technical Approach**:
-    - What specific algorithms, models, or technical methods would you use?
-    - What data transformations or preprocessing steps are needed?
-    - **Use the CODE tab** to provide pseudocode or implementation sketches
-    - What tools/libraries would you leverage?
-
-    3. **Implementation Details**:
-    - Technical architecture and design decisions
-    - Data pipeline and processing flow
-    """
-            
-            framework_guidance += f"""
-    {'3' if is_technical_role else '2'}. **Implementation Plan**:
-    - What's the logical sequence of steps?
-    - What are key dependencies?
-    - What potential challenges do you foresee for {company_name}?
-    """
-            
-            if is_technical_role:
-                framework_guidance += """
-    💡 **Use the workspace tabs below to organize your approach:**
-    - **📋 Framework**: High-level framework and methodology
-    - **⚙️ Technical Approach**: Algorithms, methods, techniques
-    - **💻 Code Editor**: Implementation code or pseudocode (optional)
-    """
-            else:
-                framework_guidance += """
-    💡 **Use the workspace to document your comprehensive framework and approach.**
-    """
-            
-            framework_guidance += "\nTake your time to provide a comprehensive approach."
-            
-            print(f"DEBUG: Generated first STRUCTURED approach question (technical={is_technical_role})")
-            return {
-                "messages": [AIMessage(content=framework_guidance)],
-                "approach_question_count": 1,
-                "current_activity": "awaiting_approach_structured"
-            }
-        
-        # If we just received the structured approach (count=1, has response)
-        if count == 1 and last_human_msg:
-            print(f"DEBUG: Received structured approach, generating follow-up question 2")
-            llm = get_llm_for_task('conversation', temperature=0.7)
-            
-            system_prompt = f"""You are conducting approach phase question 2 of {max_questions}.
-
-    CRITICAL: ONLY mention "{company_name}"!
-
-    **Case:** {company_name} - {problem}
-    **Role:** {role}
-
-    **Candidate's Structured Approach:**
-    {last_human_msg[:500]}
-
-    **YOUR TASK:**
-    Generate ONE follow-up question about their approach for {company_name}.
-
-    Focus on:
-    - Specific analysis techniques they'd use
-    - Trade-offs in their proposed approach
-    - How they'd prioritize different aspects
-
-    **RULES:**
-    1. Reference what THEY said in their approach
-    2. Make it specific to {company_name}
-    3. Challenge their assumptions constructively
-    4. Keep under 80 words
-    5. NO markdown, just the question
-
-    Return ONLY the question text."""
+            followup_prompt = CaseInterviewPrompts.generate_approach_followup(
+                company_name=company_name,
+                problem=problem,
+                candidate_response=str(last_human_msg),
+                question_number=count + 1,
+                is_technical=is_technical,
+                last_question=last_ai_question
+            )
             
             try:
-                response = llm.invoke([SystemMessage(content=system_prompt)])
-                question_text = response.content.strip().replace('**', '').replace('*', '')
+                response = llm.invoke([SystemMessage(content=followup_prompt)])
+                question = response.content.strip()
+                
+                # Clean up any meta-commentary
+                question = question.replace('**', '').replace('"', '')
+                
+                print(f"[DEBUG] Generated approach Q{count+1} for {company_name}")
             except Exception as e:
-                print(f"DEBUG: Error: {e}")
-                question_text = f"What specific analysis techniques would you prioritize first for {company_name}?"
-            
-            print(f"DEBUG: Generated approach question 2/{max_questions}")
-            return {
-                "messages": [AIMessage(content=question_text)],
-                "approach_question_count": 2,
-                "current_activity": "awaiting_approach"
-            }
+                print(f"[DEBUG] Error generating approach Q{count+1}: {e}")
+                question = f"How would you implement that specifically for {company_name}?"
         
-        # If waiting for response
-        if not last_human_msg:
-            print(f"DEBUG: Waiting for response to question {count}")
-            return {
-                "current_activity": "awaiting_approach"
-            }
-        
-        # Generate follow-up questions 3 and 4
-        llm = get_llm_for_task('conversation', temperature=0.7)
-        
-        system_prompt = f"""You are conducting approach phase question {count + 1} of {max_questions}.
-
-    CRITICAL: ONLY mention "{company_name}"!
-
-    **Case:** {company_name} - {problem}
-    **Role:** {role}
-
-    **Candidate's Previous Response:**
-    {last_human_msg[:500]}
-
-    **YOUR TASK:**
-    Generate ONE follow-up question about their approach for {company_name}.
-
-    **Question {count + 1} should focus on:**
-    - Implementation challenges for {company_name}
-    - Data requirements or validation methods
-    - Timeline and resource considerations
-    - Risk mitigation strategies
-
-    **RULES:**
-    1. Reference what THEY said
-    2. Make it specific to {company_name}
-    3. Keep under 80 words
-    4. NO markdown, just the question
-
-    Return ONLY the question text."""
-        
-        try:
-            response = llm.invoke([SystemMessage(content=system_prompt)])
-            question_text = response.content.strip().replace('**', '').replace('*', '')
-        except Exception as e:
-            print(f"DEBUG: Error: {e}")
-            question_text = f"What implementation challenges do you anticipate for {company_name}?"
-        
-        print(f"DEBUG: Generated approach question {count + 1}/{max_questions}")
         return {
-            "messages": [AIMessage(content=question_text)],
+            "messages": [AIMessage(content=question)],
             "approach_question_count": count + 1,
             "current_activity": "awaiting_approach"
         }
 
+
     def approach_evaluation_node(self, state: dict) -> dict:
-        """Silent evaluation of approach phase."""
+        """Evaluate approach phase using STRICT centralized prompt."""
+        print("DEBUG: Evaluating approach phase")
         evaluation = self._evaluate_phase(state, 'approach')
         
         return {
             "approach_evaluation": evaluation,
-            "current_phase": "followup",
-            "followup_question_count": 0,  # Reset counte       r
-            "followup_complete": False,
-            "current_activity": "awaiting_followup"
+            "current_phase": "final",
+            "current_activity": "generating_final_evaluation"
         }
     
-    # ========== FOLLOWUP PHASE ==========
-
-
+    # ========== EVALUATION HELPERS (STRICT QUALITY-BASED) ==========
     
-    # ========== FINAL EVALUATION ==========
-    
-    def _evaluate_phase(self, state: dict, phase_name: str) -> dict:
-        """Helper method to evaluate a specific phase WITH candidate responses."""
-        messages = state.get('messages', [])
-        case_study = state.get('case_study', {})
+    def evaluate_phase(self, state: dict, phase_name: str) -> dict:
+        """Evaluate phase with STRICT quality assessment and detailed error handling."""
+        messages = state.get("messages", [])
+        case_study = state.get("case_study", {})
+        tech_type = state.get("tech_type", "")
+        is_technical = tech_type == "Technical"
         
-        # Extract candidate responses from this phase
-        candidate_responses = []
-        for msg in reversed(messages[:30]):
-            if isinstance(msg, HumanMessage):
-                candidate_responses.insert(0, msg.content)
-                if len(candidate_responses) >= 5:
-                    break
+        # Extract Q&A pairs
+        conversation_pairs = []
+        current_question = None
         
-        llm = get_llm_for_task('evaluation', temperature=0.3)
+        for msg in messages[-30:]:
+            if isinstance(msg, AIMessage):
+                if "Case Started!" not in msg.content and "Share your initial understanding" not in msg.content:
+                    current_question = msg.content
+            elif isinstance(msg, HumanMessage) and current_question:
+                conversation_pairs.append({
+                    "question": current_question,
+                    "response": msg.content
+                })
+                current_question = None
+            
+            if len(conversation_pairs) >= 5:
+                break
         
-        eval_prompt = f"""Evaluate the candidate's {phase_name} phase performance.
-
-    Case Problem: {case_study.get('problem_statement', '')}
-
-    Candidate's Responses in this Phase:
-    {json.dumps(candidate_responses)}
-
-    Evaluate based on:
-    - Depth of analysis
-    - Clarity of communication
-    - Structured thinking
-    - Relevant insights
-    - Technical accuracy
-
-    **CRITICAL: Include the candidate's KEY RESPONSES in your evaluation for reporting.**
-
-    Return ONLY valid JSON:
-    {{
-    "score": 7.5,
-    "strengths": ["strength1", "strength2"],
-    "weaknesses": ["area1", "area2"],
-    "key_observations": ["observation1", "observation2"],
-    "candidate_key_responses": ["response excerpt 1", "response excerpt 2"],
-    "overall_comment": "..."
-    }}"""
+        print(f"[DEBUG] Extracted {len(conversation_pairs)} Q&A pairs for evaluation")
         
-        response = llm.invoke([SystemMessage(content=eval_prompt)])
-        evaluation = self.extract_json(response.content)
-        
-        if not evaluation:
-            evaluation = {
-                "score": 7.0,
-                "strengths": ["Engaged with the problem"],
-                "weaknesses": ["Could provide more depth"],
-                "key_observations": ["Demonstrated basic understanding"],
-                "candidate_key_responses": candidate_responses[:2] if candidate_responses else ["No response recorded."],
-                "overall_comment": "Satisfactory performance. Could benefit from deeper probing."
+        # Validation check
+        if len(conversation_pairs) == 0:
+            print(f"[ERROR] No conversation pairs found for {phase_name} evaluation")
+            return {
+                "score": 0.0,
+                "strengths": ["No responses detected"],
+                "weaknesses": ["Unable to evaluate - no conversation data"],
+                "key_observations": ["System error: No conversation pairs extracted"],
+                "candidate_key_responses": [],
+                "case_specificity_score": 0.0,
+                "depth_score": 0.0,
+                "response_quality_score": 0.0,
+                "overall_comment": f"Error: Unable to evaluate {phase_name} phase due to missing conversation data.",
+                "evaluation_error": True,
+                "error_details": "No Q&A pairs extracted from conversation"
             }
         
-        # Ensure responses are included
-        if 'candidate_key_responses' not in evaluation or not evaluation['candidate_key_responses']:
-            evaluation['candidate_key_responses'] = candidate_responses[:2] if candidate_responses else ["No response recorded."]
+        llm = get_llm_for_task("evaluation", temperature=0.2)
+        
+        eval_prompt = CaseInterviewPrompts.evaluate_phase_performance(
+            phase_name,
+            conversation_pairs,
+            case_study,
+            is_technical
+        )
+        
+        # Attempt evaluation with detailed error handling
+        max_retries = 2
+        evaluation = None
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"[DEBUG] Evaluation attempt {attempt + 1}/{max_retries} for {phase_name}")
+                response = llm.invoke([SystemMessage(content=eval_prompt)])
+                
+                if not response or not response.content:
+                    raise ValueError("Empty response from LLM")
+                
+                evaluation = self.extract_json(response.content)
+                
+                # Validate required fields
+                required_fields = ["score", "strengths", "weaknesses", "key_observations"]
+                missing_fields = [field for field in required_fields if field not in evaluation]
+                
+                if missing_fields:
+                    raise ValueError(f"Missing required fields: {missing_fields}")
+                
+                # Validation successful
+                print(f"[DEBUG] {phase_name} evaluation successful - score={evaluation.get('score', 0)}")
+                break
+                
+            except json.JSONDecodeError as e:
+                last_error = f"JSON parsing error: {str(e)}"
+                print(f"[ERROR] {last_error}")
+                print(f"[DEBUG] Raw response: {response.content[:500] if response else 'None'}")
+                
+            except ValueError as e:
+                last_error = f"Validation error: {str(e)}"
+                print(f"[ERROR] {last_error}")
+                
+            except Exception as e:
+                last_error = f"Unexpected error: {type(e).__name__} - {str(e)}"
+                print(f"[ERROR] {last_error}")
+            
+            # If not last attempt, wait before retry
+            if attempt < max_retries - 1:
+                print(f"[DEBUG] Retrying evaluation...")
+                time.sleep(1)
+        
+        # If all retries failed, create detailed fallback
+        if not evaluation or "score" not in evaluation:
+            print(f"[ERROR] All evaluation attempts failed for {phase_name}")
+            
+            # Extract candidate responses for context
+            candidate_responses = [pair["response"][:200] for pair in conversation_pairs[:3]]
+            
+            evaluation = {
+                "score": 5.0,  # Neutral score when evaluation fails
+                "strengths": ["Participated in the interview"],
+                "weaknesses": [
+                    "Unable to generate detailed evaluation due to system error",
+                    "Please review responses manually"
+                ],
+                "key_observations": [
+                    f"Evaluation system encountered an error: {last_error}",
+                    f"Responded to {len(conversation_pairs)} questions",
+                    "Manual review recommended for accurate assessment"
+                ],
+                "candidate_key_responses": candidate_responses,
+                "case_specificity_score": 5.0,
+                "depth_score": 5.0,
+                "response_quality_score": 5.0,
+                "overall_comment": f"Evaluation for {phase_name} phase could not be completed due to system error. "
+                                f"The candidate provided {len(conversation_pairs)} responses. "
+                                f"Manual review is recommended. Error: {last_error}",
+                "evaluation_error": True,
+                "error_details": last_error
+            }
+        
+        # Ensure candidate_key_responses exists
+        if "candidate_key_responses" not in evaluation:
+            evaluation["candidate_key_responses"] = [pair["response"][:200] for pair in conversation_pairs[:2]]
         
         return evaluation
 
-
     def final_evaluation_node(self, state: dict) -> dict:
-        """Generate comprehensive final evaluation WITH detailed dimension scores and responses."""
-        messages = state.get('messages', [])
-        case_study = state.get('case_study', {})
-        domain = state.get('domain', '')
-        role = state.get('role', '')
+        """Generate STRICT final evaluation with comprehensive error handling."""
+        messages = state.get("messages", [])
+        case_study = state.get("case_study", {})
+        domain = state.get("domain", "")
+        role = state.get("role", "")
+        tech_type = state.get("tech_type", "")
+        is_technical = tech_type == "Technical"
         
-        # Get phase evaluations (now include responses)
-        understanding_eval = state.get('understanding_evaluation', {})
-        approach_eval = state.get('approach_evaluation', {})
-        followup_eval = state.get('followup_evaluation', {})
+        understanding_eval = state.get("understanding_evaluation", {})
+        approach_eval = state.get("approach_evaluation", {})
         
-        candidate_responses = [
-            msg.content for msg in messages
-            if isinstance(msg, HumanMessage)
-        ]
+        # Check for phase evaluation errors
+        has_errors = (understanding_eval.get("evaluation_error") or 
+                    approach_eval.get("evaluation_error"))
         
-        llm = get_llm_for_task('evaluation', temperature=0.3)
+        if has_errors:
+            error_msg = "⚠️ **Evaluation Issues Detected**\n\n"
+            if understanding_eval.get("evaluation_error"):
+                error_msg += f"- Understanding phase: {understanding_eval.get('error_details', 'Unknown error')}\n"
+            if approach_eval.get("evaluation_error"):
+                error_msg += f"- Approach phase: {approach_eval.get('error_details', 'Unknown error')}\n"
+            
+            print(f"[WARNING] Phase evaluation errors detected:\n{error_msg}")
         
-        prompt = f"""Generate a comprehensive final interview evaluation report with DIMENSION SCORES.
-
-    **Case Study:**
-    {case_study.get('problem_statement', '')}
-
-    **Candidate Profile:**
-    - Role: {role}
-    - Domain: {domain}
-
-    **Phase Evaluations (with candidate responses):**
-    Understanding Phase: {json.dumps(understanding_eval)}
-    Approach Phase: {json.dumps(approach_eval)}
-    Follow-up Phase: {json.dumps(followup_eval)}
-
-    **All Candidate Responses:**
-    {json.dumps(candidate_responses[-15:])}
-
-    Generate detailed evaluation covering:
-
-    1. Overall score (1-10)
-    2. **DIMENSION SCORES with candidate response excerpts:**
-    - Domain Expertise & Technical Skills (25%)
-    - Problem-Solving Skills & Critical Thinking (25%)
-    - Structured Thinking (25%)
-    - Professionalism (25%)
-
-    3. Key strengths and development areas
-    4. Phase-wise breakdown
-    5. Recommended next steps
-
-    **CRITICAL:** For EACH dimension, include:
-    - Score (1-10)
-    - Brief justification
-    - Specific candidate response excerpt that demonstrates this dimension
-
-    Return ONLY valid JSON:
-    {{
-    "overall_score": 7.5,
-    "performance_level": "Strong",
-    "interview_summary": "...",
-    "dimension_scores": [
-        {{
-        "dimension": "Domain Expertise & Technical Skills",
-        "weight": 25,
-        "score": 8.0,
-        "justification": "...",
-        "candidate_response_excerpt": "..."
-        }},
-        {{
-        "dimension": "Problem-Solving Skills & Critical Thinking",
-        "weight": 15,
-        "score": 7.5,
-        "justification": "...",
-        "candidate_response_excerpt": "..."
-        }},
-        {{
-        "dimension": "Clarity",
-        "weight": 15,
-        "score": 8.5,
-        "justification": "...",
-        "candidate_response_excerpt": "..."
-        }},
-        {{
-        "dimension": "Business Acumen",
-        "weight": 15,
-        "score": 7.0,
-        "justification": "...",
-        "candidate_response_excerpt": "..."
-        }},
-        {{
-        "dimension": "Structured Thinking",
-        "weight": 15,
-        "score": 8.0,
-        "justification": "...",
-        "candidate_response_excerpt": "..."
-        }},
-        {{
-        "dimension": "Professionalism",
-        "weight": 15,
-        "score": 9.0,
-        "justification": "...",
-        "candidate_response_excerpt": "..."
-        }}
-    ],
-    "key_strengths": ["strength1", "strength2", "strength3"],
-    "development_areas": ["area1", "area2", "area3"],
-    "phase_breakdown": {{
-        "understanding": "...",
-        "approach": "...",
-        "followup": "..."
-    }},
-    "recommended_next_steps": ["step1", "step2", "step3"]
-    }}"""
+        candidate_responses = [msg.content for msg in messages if isinstance(msg, HumanMessage)]
         
-        response = llm.invoke([SystemMessage(content=prompt)])
-        final_eval = self.extract_json(response.content)
+        print(f"[DEBUG] Generating final evaluation - {len(candidate_responses)} responses")
         
-        if not final_eval or 'dimension_scores' not in final_eval:
+        llm = get_llm_for_task("evaluation", temperature=0.3)
+        
+        prompt = CaseInterviewPrompts.generate_final_evaluation(
+            candidate_responses,
+            understanding_eval,
+            approach_eval,
+            case_study,
+            domain,
+            role,
+            is_technical
+        )
+        
+        max_retries = 2
+        final_eval = None
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                print(f"[DEBUG] Final evaluation attempt {attempt + 1}/{max_retries}")
+                response = llm.invoke([SystemMessage(content=prompt)])
+                
+                if not response or not response.content:
+                    raise ValueError("Empty response from LLM")
+                
+                final_eval = self.extract_json(response.content)
+                
+                # Validate structure
+                required_fields = ["overall_score", "performance_level", "dimension_scores"]
+                missing_fields = [field for field in required_fields if field not in final_eval]
+                
+                if missing_fields:
+                    raise ValueError(f"Missing required fields: {missing_fields}")
+                
+                print(f"[DEBUG] Final evaluation complete - overall={final_eval.get('overall_score', 0)}")
+                break
+                
+            except Exception as e:
+                last_error = f"{type(e).__name__}: {str(e)}"
+                print(f"[ERROR] Final evaluation error: {last_error}")
+                
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+        
+        # Fallback with error context
+        if not final_eval or "dimension_scores" not in final_eval:
+            print(f"[ERROR] All final evaluation attempts failed")
+            
+            # Calculate average from phase scores if available
+            avg_score = 5.0
+            if understanding_eval.get("score") and approach_eval.get("score"):
+                avg_score = (understanding_eval["score"] + approach_eval["score"]) / 2
+            
             final_eval = {
-                "overall_score": 7.0,
-                "performance_level": "Satisfactory",
-                "interview_summary": "Candidate demonstrated a solid understanding of the core problem and proposed a reasonable approach. Further development is needed in probing for unstated assumptions and detailing technical implementations.",
+                "overall_score": avg_score,
+                "performance_level": "Competent" if avg_score >= 5 else "Developing",
+                "interview_summary": f"Interview completed with {len(candidate_responses)} responses. "
+                                f"Automated evaluation encountered errors. "
+                                f"Phase scores - Understanding: {understanding_eval.get('score', 'N/A')}, "
+                                f"Approach: {approach_eval.get('score', 'N/A')}. "
+                                f"Manual review recommended.",
                 "dimension_scores": [
                     {
                         "dimension": "Domain Expertise & Technical Skills",
+                        "weight": 30,
+                        "score": avg_score,
+                        "justification": "Automated evaluation failed. Manual review needed.",
+                        "candidate_response_excerpt": candidate_responses[-1][:200] if candidate_responses else "N/A"
+                    },
+                    {
+                        "dimension": "Problem-Solving & Critical Thinking",
                         "weight": 25,
-                        "score": 7.0,
-                        "justification": "Showed adequate technical knowledge for the role but could provide more specific examples.",
-                        "candidate_response_excerpt": candidate_responses[-3] if len(candidate_responses) >= 3 else "N/A"
+                        "score": avg_score,
+                        "justification": "Automated evaluation failed. Manual review needed.",
+                        "candidate_response_excerpt": candidate_responses[-2][:200] if len(candidate_responses) > 1 else "N/A"
                     },
                     {
-                        "dimension": "Problem-Solving Skills & Critical Thinking",
-                        "weight": 15,
-                        "score": 7.5,
-                        "justification": "Effectively broke down the problem into manageable components.",
-                        "candidate_response_excerpt": candidate_responses[-2] if len(candidate_responses) >= 2 else "N/A"
+                        "dimension": "Communication & Collaboration",
+                        "weight": 20,
+                        "score": avg_score,
+                        "justification": "Automated evaluation failed. Manual review needed.",
+                        "candidate_response_excerpt": candidate_responses[-3][:200] if len(candidate_responses) > 2 else "N/A"
                     },
                     {
-                        "dimension": "Structured Thinking",
-                        "weight": 15,
-                        "score": 8.0,
-                        "justification": "Presented a logical and well-organized framework for their approach.",
-                        "candidate_response_excerpt": candidate_responses[-1] if candidate_responses else "N/A"
+                        "dimension": "Adaptability & Creativity",
+                        "weight": 25,
+                        "score": avg_score,
+                        "justification": "Automated evaluation failed. Manual review needed.",
+                        "candidate_response_excerpt": candidate_responses[-4][:200] if len(candidate_responses) > 3 else "N/A"
                     }
                 ],
-                "key_strengths": ["Clear and concise communication", "Logical problem structuring", "Maintained professional demeanor"],
-                "development_areas": ["Deeper technical analysis is needed", "Consider edge cases and potential risks more thoroughly", "Proactively ask for clarifying data"],
+                "key_strengths": ["Completed interview", "Provided responses to questions"],
+                "development_areas": ["Manual evaluation required due to system error"],
                 "phase_breakdown": {
-                    "understanding": "Good grasp of the core issues, but could have asked more probing questions.",
-                    "approach": "A reasonable and structured framework was proposed. Lacked some detail on implementation."
+                    "understanding": f"Score: {understanding_eval.get('score', 'Error')} - {understanding_eval.get('overall_comment', 'Evaluation failed')}",
+                    "approach": f"Score: {approach_eval.get('score', 'Error')} - {approach_eval.get('overall_comment', 'Evaluation failed')}"
                 },
-                "recommended_next_steps": ["Practice more complex case studies", "Deepen knowledge of specific algorithms relevant to the domain", "Focus on anticipating potential roadblocks in project plans"]
+                "recommended_next_steps": [
+                    "Review responses manually for accurate assessment",
+                    "Check system logs for technical issues",
+                    "Contact support if errors persist"
+                ],
+                "evaluation_error": True,
+                "error_details": last_error or "Final evaluation generation failed"
             }
         
-        # Format comprehensive report
-        score = final_eval.get('overall_score', 7.0)
-        level = final_eval.get('performance_level', 'Satisfactory')
-        
-        report = f"""
-    ╔══════════════════════════════════════════════════════════════════════════════╗
-    📊 FINAL INTERVIEW EVALUATION
-    ╚══════════════════════════════════════════════════════════════════════════════╝
-
-    **Overall Score:** {score}/10
-    **Performance Level:** {level}
-
-    ---
-
-    **📝 Interview Summary:**
-    {final_eval.get('interview_summary', 'N/A')}
-
-    ---
-
-    **📊 DIMENSION SCORES:**
-    """
-        
-        # Add detailed dimension scores with responses
-        for dim in final_eval.get('dimension_scores', []):
-            report += f"""
-    **{dim.get('dimension', 'N/A')}** (Weight: {dim.get('weight', 0)}%)
-    - Score: {dim.get('score', 0)}/10
-    - Justification: {dim.get('justification', 'N/A')}
-    - Candidate Response: "{dim.get('candidate_response_excerpt', 'N/A')[:200]}..."
-    """
-        
-        report += "\n---\n\n**✅ KEY STRENGTHS:**\n"
-        for strength in final_eval.get('key_strengths', []):
-            report += f"\n✓ {strength}"
-        
-        report += "\n\n---\n\n**📈 AREAS FOR DEVELOPMENT:**\n"
-        for area in final_eval.get('development_areas', []):
-            report += f"\n⚠ {area}"
-        
-        report += "\n\n---\n\n**🔍 PHASE BREAKDOWN:**\n"
-        breakdown = final_eval.get('phase_breakdown', {})
-        report += f"\n**Understanding Phase:** {breakdown.get('understanding', 'N/A')}"
-        report += f"\n**Approach Phase:** {breakdown.get('approach', 'N/A')}"
-
-        
-        report += "\n\n---\n\n**🎯 RECOMMENDED NEXT STEPS:**\n"
-        for step in final_eval.get('recommended_next_steps', []):
-            report += f"\n→ {step}"
-        
-        report += "\n\n╔══════════════════════════════════════════════════════════════════════════════╗\n"
-        report += "                       Thank you for participating!\n"
-        report += "╚══════════════════════════════════════════════════════════════════════════════╝\n"
+        print(f"[DEBUG] Final evaluation complete - overall={final_eval.get('overall_score', 0)}")
         
         return {
             "final_evaluation": final_eval,
-            "messages": [AIMessage(content=report)],
             "interview_complete": True,
-            "current_activity": "complete"
+            "current_activity": "interview_complete",
+            "completion_time": time.time()
+        }
+
+
+    # ========== ROUTING ==========
+    
+    def route_by_activity(self, state: dict) -> str:
+        """Router based on current activity and phase."""
+        current_activity = state.get('current_activity', '')
+        current_phase = state.get('current_phase', 'classification')
+        
+        print(f"DEBUG: Routing - phase={current_phase}, activity={current_activity}")
+        
+        # Validation routing
+        if state.get('validation_failed'):
+            return "validation_failed"
+        
+        # Phase-based routing
+        if current_phase == 'classification':
+            if current_activity == 'awaiting_mcq_answer':
+                return "process_mcq_answers"
+            elif current_activity == 'processing_mcq':
+                return "generate_case"
+            else:
+                return "generate_mcq"
+        
+        elif current_phase == 'understanding':
+            if current_activity == 'awaiting_understanding':
+                return "understanding"
+            elif current_activity == 'phase_complete':
+                return "understanding_evaluation"
+            else:
+                return "generate_case"
+        
+        elif current_phase == 'approach':
+            if current_activity in ['awaiting_approach_structured', 'awaiting_approach']:
+                return "validate_response"
+            elif current_activity == 'phase_complete':
+                return "approach_evaluation"
+            else:
+                return "approach"
+        
+        elif current_phase == 'final':
+            return "final_evaluation"
+        
+        # Default fallback
+        print(f"DEBUG: Using fallback routing")
+        return "generate_mcq"
+
+    def handle_validation_failed(self, state: dict) -> dict:
+        """Handle validation failure - return to awaiting state."""
+        print("DEBUG: Handling validation failure")
+        return {
+            "current_activity": state.get('current_activity', 'awaiting_understanding'),
+            "validation_failed": False  # Reset for next attempt
         }
