@@ -71,7 +71,7 @@ class CaseInterviewPrompts:
     @staticmethod
     def generate_mcq_questions(role: str, skills: str, mcq_current: int) -> str:
         """Generate MCQ questions to assess candidate preferences."""
-        return f"""Generate a single multiple-choice question for {role} role.
+        return f"""Generate a single multiple-choice question for the {role} role.
 
 Context:
 - Role: {role}
@@ -79,14 +79,22 @@ Context:
 - Question Number: {mcq_current}
 
 Based on the question number, focus on:
-- Question 1: Problem-solving preferences (Analytical/data-driven vs Strategic/business vs Technical/implementation vs Operational/process optimization)
-- Question 2: Industry preference (2 industries most relevant to {role}, 1 alternative industry, 1 "Other" option)
-- Question 3: Case complexity preference (Structured problems with clear metrics vs Open-ended exploratory analysis vs Mixed approach with ambiguity vs Real-time decision making under uncertainty)
+- Question 1: Problem-solving preferences 
+  (Analytical/data-driven vs Strategic/business vs Technical/implementation vs Operational/process optimization)
+
+- Question 2: Industry preference 
+  (2 industries most relevant to {role}, 1 alternative industry, 1 "Other" option)
+
+- Question 3: Case complexity preference 
+  (Structured problems with clear metrics vs Open-ended exploratory analysis vs Mixed approach with ambiguity vs Real-time decision making under uncertainty)
+  **Ensure this question is completely different from Question 1. 
+  Do NOT ask about problem-solving style again. 
+  Focus strictly on the level of complexity or ambiguity the candidate prefers.**
 
 Requirements:
-- Make the question highly relevant to the role and skills
-- Provide exactly 4 options (A, B, C, D)
-- Question {mcq_current} should assess the corresponding focus area above
+- Make the question highly relevant to the role and skills.
+- Provide exactly 4 options (A, B, C, D).
+- Question {mcq_current} must assess the corresponding focus area above without repeating or rephrasing another question.
 
 Return JSON format:
 {{
@@ -97,7 +105,9 @@ Return JSON format:
     {{"letter": "C", "text": "..."}},
     {{"letter": "D", "text": "..."}}
   ]
-}}"""
+}}
+"""
+
 
     @staticmethod
     def interpret_mcq_answers(mcq_questions: list, mcq_answers: list, role: str, skills: str) -> str:
