@@ -716,7 +716,7 @@ def handle_conversation_phase(state, current_phase):
         approach_count = state.get('approach_question_count', 0)
         
         # ✅ FIX: Only show workspace for FIRST approach question
-        if current_phase == 'approach' and approach_count == 0:
+        if current_phase == 'approach' and approach_count == 1:
             render_approach_workspace()
         else:
             # For all other questions (understanding OR approach follow-ups), show standard input
